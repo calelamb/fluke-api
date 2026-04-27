@@ -1,10 +1,23 @@
 import type { IdConfidence, SightingDTO } from '@fluke/shared';
 import type { FastifyPluginAsync } from 'fastify';
+import { z } from 'zod';
 import { prisma } from '../db.js';
 
 const notImplemented = {
-  error: 'Not implemented in milestone 1',
+  error: 'Not implemented in milestone 5',
 };
+
+const SubmitSightingBody = z.object({
+  observedAt: z.string().datetime(),
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  locationName: z.string().max(200).optional().nullable(),
+  ecotypeGuess: z.enum(['RESIDENT', 'BIGGS', 'OFFSHORE', 'UNKNOWN']).optional().nullable(),
+  groupSize: z.number().int().min(1).max(100).optional().nullable(),
+  behaviorNotes: z.string().max(2000).optional().nullable(),
+  observerName: z.string().max(120).optional().nullable(),
+  observerEmail: z.string().email().max(200),
+});
 
 const sightingsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get('/sightings', async (): Promise<SightingDTO[]> => {
@@ -41,7 +54,38 @@ const sightingsRoutes: FastifyPluginAsync = async (fastify) => {
     }));
   });
 
-  fastify.post('/sightings', async (_request, reply) => reply.code(501).send(notImplemented));
+  fastify.post(
+    '/sightings',
+    {
+      config: {
+        rateLimit: { max: 5, timeWindow: '1 hour' },
+      },
+    },
+    async (request, reply) => {
+      const parsed = SubmitSightingBody.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: 'Invalid sighting submission' });
+      }
+
+      const body = parsed.data;
+      const sighting = await prisma.sighting.create({
+        data: {
+          observedAt: new Date(body.observedAt),
+          latitude: body.latitude,
+          longitude: body.longitude,
+          locationName: body.locationName,
+          ecotypeGuess: body.ecotypeGuess,
+          groupSize: body.groupSize,
+          behaviorNotes: body.behaviorNotes,
+          observerName: body.observerName,
+          observerEmail: body.observerEmail,
+          status: 'PENDING',
+        },
+      });
+
+      return reply.code(201).send({ ok: true, id: sighting.id });
+    },
+  );
   fastify.put('/sightings/:id', async (_request, reply) => reply.code(501).send(notImplemented));
   fastify.patch('/sightings/:id', async (_request, reply) => reply.code(501).send(notImplemented));
   fastify.delete('/sightings/:id', async (_request, reply) => reply.code(501).send(notImplemented));

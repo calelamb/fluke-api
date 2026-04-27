@@ -120,12 +120,13 @@ model SightingWhale {
 }
 
 model User {
-  id         String     @id @default(uuid())
-  email      String     @unique
-  role       UserRole   @default(MODERATOR)
-  sightings  Sighting[]
-  auditLogs  AuditLog[]
-  createdAt  DateTime   @default(now()) @map("created_at")
+  id            String     @id @default(uuid())
+  email         String     @unique
+  passwordHash  String     @map("password_hash")
+  role          UserRole   @default(MODERATOR)
+  sightings     Sighting[]
+  auditLogs     AuditLog[]
+  createdAt     DateTime   @default(now()) @map("created_at")
 
   @@map("users")
 }

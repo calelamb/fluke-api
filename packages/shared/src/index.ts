@@ -48,3 +48,35 @@ export interface SightingDTO {
     confidence: IdConfidence;
   }>;
 }
+
+export interface PendingSightingDTO {
+  id: string;
+  observedAt: string;
+  latitude: number;
+  longitude: number;
+  locationName: string | null;
+  ecotypeGuess: Ecotype | null;
+  groupSize: number | null;
+  behaviorNotes: string | null;
+  observerName: string | null;
+  observerEmail: string;
+  status: SightingStatus;
+  createdAt: string;
+  identifiedWhales: Array<{
+    catalogId: string;
+    name: string | null;
+    confidence: IdConfidence;
+  }>;
+}
+
+export interface SubmitSightingPayload {
+  observedAt: string;
+  latitude: number;
+  longitude: number;
+  locationName?: string | null;
+  ecotypeGuess?: Ecotype | null;
+  groupSize?: number | null;
+  behaviorNotes?: string | null;
+  observerName?: string | null;
+  observerEmail: string;
+}
