@@ -19,6 +19,18 @@ export interface WhaleDTO {
   heroImageUrl: string | null;
 }
 
+export interface WhaleProfileDTO extends WhaleDTO {
+  mother: { catalogId: string; name: string | null } | null;
+  offspring: Array<{ catalogId: string; name: string | null }>;
+  recentSightings: Array<{
+    id: string;
+    observedAt: string;
+    locationName: string | null;
+    latitude: number;
+    longitude: number;
+  }>;
+}
+
 export interface SightingDTO {
   id: string;
   observedAt: string;

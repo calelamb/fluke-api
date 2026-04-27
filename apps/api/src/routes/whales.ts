@@ -1,4 +1,4 @@
-import type { WhaleDTO } from '@fluke/shared';
+import type { WhaleDTO, WhaleProfileDTO } from '@fluke/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { prisma } from '../db.js';
 
@@ -45,13 +45,46 @@ const whalesRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get<{ Params: { catalogId: string } }>('/whales/:catalogId', async (request, reply) => {
     const whale = await prisma.whale.findUnique({
       where: { catalogId: request.params.catalogId },
+      include: {
+        mother: { select: { catalogId: true, name: true } },
+        offspring: { select: { catalogId: true, name: true } },
+        sightings: {
+          where: { sighting: { status: 'APPROVED' } },
+          take: 5,
+          orderBy: { sighting: { observedAt: 'desc' } },
+          include: {
+            sighting: {
+              select: {
+                id: true,
+                observedAt: true,
+                locationName: true,
+                latitude: true,
+                longitude: true,
+              },
+            },
+          },
+        },
+      },
     });
 
     if (!whale) {
-      return reply.notFound(`Whale ${request.params.catalogId} was not found`);
+      return reply.code(404).send({ error: 'Whale not found' });
     }
 
-    return toWhaleDTO(whale);
+    const dto: WhaleProfileDTO = {
+      ...toWhaleDTO(whale),
+      mother: whale.mother,
+      offspring: whale.offspring,
+      recentSightings: whale.sightings.map(({ sighting }) => ({
+        id: sighting.id,
+        observedAt: sighting.observedAt.toISOString(),
+        locationName: sighting.locationName,
+        latitude: Number(sighting.latitude),
+        longitude: Number(sighting.longitude),
+      })),
+    };
+
+    return dto;
   });
 };
 
