@@ -60,6 +60,8 @@ model Whale {
   biography             String?
   distinguishingMarks   String?         @map("distinguishing_marks")
   heroImageUrl          String?         @map("hero_image_url")
+  notableEvents         Json?           @map("notable_events")
+  sourceCitations       Json?           @map("source_citations")
   sightings             SightingWhale[]
   createdAt             DateTime        @default(now()) @map("created_at")
   updatedAt             DateTime        @updatedAt @map("updated_at")

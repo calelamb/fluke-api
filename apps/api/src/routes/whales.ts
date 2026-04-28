@@ -1,6 +1,14 @@
-import type { WhaleDTO, WhaleProfileDTO } from '@fluke/shared';
+import type { NotableEvent, SourceCitation, WhaleDTO, WhaleProfileDTO } from '@fluke/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { prisma } from '../db.js';
+
+function asNotableEvents(value: unknown): NotableEvent[] {
+  return Array.isArray(value) ? (value as NotableEvent[]) : [];
+}
+
+function asSourceCitations(value: unknown): SourceCitation[] {
+  return Array.isArray(value) ? (value as SourceCitation[]) : [];
+}
 
 function toWhaleDTO(whale: {
   id: string;
@@ -15,6 +23,8 @@ function toWhaleDTO(whale: {
   biography: string | null;
   distinguishingMarks: string | null;
   heroImageUrl: string | null;
+  notableEvents: unknown;
+  sourceCitations: unknown;
 }): WhaleDTO {
   return {
     id: whale.id,
@@ -29,6 +39,8 @@ function toWhaleDTO(whale: {
     biography: whale.biography,
     distinguishingMarks: whale.distinguishingMarks,
     heroImageUrl: whale.heroImageUrl,
+    notableEvents: asNotableEvents(whale.notableEvents).slice().sort((a, b) => a.year - b.year),
+    sourceCitations: asSourceCitations(whale.sourceCitations),
   };
 }
 
@@ -50,7 +62,7 @@ const whalesRoutes: FastifyPluginAsync = async (fastify) => {
         offspring: { select: { catalogId: true, name: true } },
         sightings: {
           where: { sighting: { status: 'APPROVED' } },
-          take: 5,
+          take: 25,
           orderBy: { sighting: { observedAt: 'desc' } },
           include: {
             sighting: {

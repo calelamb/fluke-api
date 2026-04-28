@@ -4,6 +4,29 @@ export type WhaleStatus = 'ALIVE' | 'DECEASED' | 'UNKNOWN';
 export type SightingStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type IdConfidence = 'CONFIRMED' | 'LIKELY' | 'ML_SUGGESTED';
 
+export type NotableEventType =
+  | 'birth'
+  | 'death'
+  | 'loss'
+  | 'capture'
+  | 'release'
+  | 'pod-switch'
+  | 'first-documented'
+  | 'milestone';
+
+export interface NotableEvent {
+  year: number;
+  date?: string;
+  type: NotableEventType;
+  summary: string;
+  source?: string;
+}
+
+export interface SourceCitation {
+  label: string;
+  url: string;
+}
+
 export interface WhaleDTO {
   id: string;
   catalogId: string;
@@ -17,6 +40,8 @@ export interface WhaleDTO {
   biography: string | null;
   distinguishingMarks: string | null;
   heroImageUrl: string | null;
+  notableEvents: NotableEvent[];
+  sourceCitations: SourceCitation[];
 }
 
 export interface WhaleProfileDTO extends WhaleDTO {
