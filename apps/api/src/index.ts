@@ -14,25 +14,24 @@ import whalesRoutes from './routes/whales.js';
 
 dotenv.config();
 
-const { env } = await import('./env.js');
+const { env, isProduction } = await import('./env.js');
 
 const app = Fastify({
-  logger:
-    process.env.NODE_ENV === 'production'
-      ? true
-      : {
-          transport: {
-            target: 'pino-pretty',
-            options: {
-              colorize: true,
-              translateTime: 'SYS:standard',
-            },
+  logger: isProduction
+    ? true
+    : {
+        transport: {
+          target: 'pino-pretty',
+          options: {
+            colorize: true,
+            translateTime: 'SYS:standard',
           },
         },
+      },
 });
 
 await app.register(cors, {
-  origin: 'http://localhost:5173',
+  origin: env.WEB_ORIGIN,
   credentials: true,
 });
 await app.register(cookie);

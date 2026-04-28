@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { prisma } from '../db.js';
 
 const notImplemented = {
-  error: 'Not implemented in milestone 5',
+  error: 'Not implemented; reserved for future user-account work',
 };
 
 const SubmitSightingBody = z.object({

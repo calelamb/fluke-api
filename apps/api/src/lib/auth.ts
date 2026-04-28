@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { isProduction } from '../env.js';
 
 export interface AdminClaims {
   userId: string;
@@ -24,7 +25,7 @@ export async function requireAdmin(req: FastifyRequest, reply: FastifyReply) {
 export function setAdminCookie(reply: FastifyReply, token: string, cookieName: string) {
   reply.setCookie(cookieName, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: isProduction,
     sameSite: 'lax',
     path: '/',
     maxAge: 60 * 60 * 24 * 7,
