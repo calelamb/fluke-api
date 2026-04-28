@@ -18,7 +18,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   JWT_SECRET: z.string().min(32),
   ADMIN_COOKIE_NAME: z.string().min(1).default('fluke_admin'),
-  WEB_ORIGIN: originList.default('http://localhost:5173'),
+  WEB_ORIGIN: originList.default('http://localhost:5174,http://localhost:5173'),
 });
 
 const parsedEnv = envSchema.safeParse(process.env);
