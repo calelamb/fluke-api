@@ -146,3 +146,28 @@ model AuditLog {
   @@index([userId, createdAt(sort: Desc)])
   @@map("audit_log")
 }
+
+// External sighting feeds (Acartia, Orcasound, etc.) live in their own table
+// to keep provenance separate from user-submitted Sightings. They bypass the
+// moderation queue because the source organisations have already vetted them.
+model ExternalSighting {
+  id            String   @id @default(uuid())
+  source        String   // 'acartia', 'orcasound', etc.
+  externalId    String   @map("external_id")
+  observedAt    DateTime @map("observed_at")
+  latitude      Decimal  @db.Decimal(9, 6)
+  longitude     Decimal  @db.Decimal(9, 6)
+  species       String   // raw type field from source (e.g. 'Killer Whale')
+  ecotypeGuess  Ecotype? @map("ecotype_guess")
+  groupSize     Int?     @map("group_size")
+  attribution   String   // org name for display, e.g. 'Conserve.io / Spotter-API'
+  sourceUrl     String?  @map("source_url")
+  notes         String?
+  trusted       Boolean  @default(false)
+  fetchedAt     DateTime @default(now()) @map("fetched_at")
+
+  @@unique([source, externalId])
+  @@index([observedAt(sort: Desc)])
+  @@index([latitude, longitude])
+  @@map("external_sightings")
+}

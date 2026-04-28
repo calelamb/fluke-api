@@ -105,3 +105,19 @@ export interface SubmitSightingPayload {
   observerName?: string | null;
   observerEmail: string;
 }
+
+export interface ExternalSightingDTO {
+  id: string;
+  source: string;
+  externalId: string;
+  observedAt: string;
+  latitude: number;
+  longitude: number;
+  species: string;
+  ecotypeGuess: Ecotype | null;
+  groupSize: number | null;
+  attribution: string;
+  sourceUrl: string | null;
+  notes: string | null;
+  trusted: boolean;
+}

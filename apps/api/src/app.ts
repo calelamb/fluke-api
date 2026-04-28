@@ -7,6 +7,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { env, isProduction } from './env.js';
 import adminRoutes from './routes/admin.js';
 import authRoutes from './routes/auth.js';
+import externalSightingsRoutes from './routes/external-sightings.js';
 import healthRoutes from './routes/health.js';
 import identifyRoutes from './routes/identify.js';
 import sightingsRoutes from './routes/sightings.js';
@@ -50,6 +51,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await app.register(healthRoutes, { prefix: '/api/v1' });
   await app.register(whalesRoutes, { prefix: '/api/v1' });
   await app.register(sightingsRoutes, { prefix: '/api/v1' });
+  await app.register(externalSightingsRoutes, { prefix: '/api/v1' });
   await app.register(identifyRoutes, { prefix: '/api/v1' });
   await app.register(authRoutes, { prefix: '/api/v1/auth' });
   await app.register(adminRoutes, { prefix: '/api/v1/admin' });
