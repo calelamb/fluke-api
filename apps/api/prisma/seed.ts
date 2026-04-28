@@ -1,5 +1,12 @@
 import { PrismaClient } from '@prisma/client';
 
+// Whale bios are written from public sources and represent the project author's
+// understanding as of seed time. Authoritative catalogs are maintained by:
+//   - Center for Whale Research (Southern Residents): https://www.whaleresearch.com/
+//   - Bigg's Killer Whale ID Project (Transients): https://www.bcwhales.org/
+//   - Orca Network (sightings & history): https://www.orcanetwork.org/
+// For any individual, defer to those sources over this seed data.
+
 const prisma = new PrismaClient();
 
 const whales = [
@@ -12,7 +19,7 @@ const whales = [
     birthYear: 1911,
     deathYear: 2016,
     status: 'DECEASED' as const,
-    biography: 'For decades the matriarch of J pod, Granny was widely believed to be the oldest known orca in the world at the time of her death. She led her family through the Salish Sea well into her later years and became a symbol of orca longevity and the matrilineal social structure of Southern Resident killer whales.',
+    biography: 'For decades the matriarch of J pod, Granny was widely described as one of the oldest known orcas in the world. Her exact birth year is debated: the original 1911 estimate has been contested by more recent analysis, and her true age may never be known with certainty. What is not disputed is her significance. Granny was one of the longest-documented Southern Resident killer whales, led her family through the Salish Sea into old age, and became a public symbol of orca longevity and matrilineal social structure.',
     distinguishingMarks: 'A distinctive half-moon nick midway down the trailing edge of her dorsal fin.',
   },
   {
@@ -86,19 +93,19 @@ const whales = [
     ecotype: 'BIGGS' as const,
     pod: 'T065A matriline',
     sex: 'MALE' as const,
-    birthYear: 2004,
+    birthYear: null,
     status: 'ALIVE' as const,
-    biography: 'A mature member of the T065A matriline, one of the most frequently-sighted Bigg\'s killer whale family groups in the Salish Sea. Bigg\'s orcas - also called transients - hunt marine mammals such as harbor seals, porpoises, and sea lions, and travel in smaller, quieter groups than fish-eating Residents.',
+    biography: 'An estimated mature member of the T065A matriline, one of the frequently-sighted Bigg\'s killer whale family groups in the Salish Sea. Bigg\'s orcas - also called transients - hunt marine mammals such as harbor seals, porpoises, and sea lions, and travel in smaller, quieter groups than fish-eating Residents. Bigg\'s individual identification details are best maintained by the Bigg\'s Killer Whale ID Project; defer to that catalog for definitive information.',
   },
   {
     catalogId: 'T049A1',
-    name: 'Noah',
+    name: null,
     ecotype: 'BIGGS' as const,
     pod: 'T049A matriline',
     sex: 'MALE' as const,
     birthYear: 2001,
     status: 'ALIVE' as const,
-    biography: 'A large adult male of the T049A matriline. Like other mature Bigg\'s males, Noah is identifiable by his distinctive tall dorsal fin and saddle patch pattern. Bigg\'s killer whales have shown a population increase in recent decades, in contrast to the declining trend among Southern Residents.',
+    biography: 'A large adult male of the T049A matriline, identifiable to trained observers by his tall dorsal fin and saddle patch pattern. Bigg\'s killer whales have shown a population increase in recent decades, in contrast to the declining trend among Southern Residents. Bigg\'s individual identification details are best maintained by the Bigg\'s Killer Whale ID Project; defer to that catalog for definitive information.',
   },
   {
     catalogId: 'T037A1B',
@@ -106,9 +113,9 @@ const whales = [
     ecotype: 'BIGGS' as const,
     pod: 'T037A matriline',
     sex: 'UNKNOWN' as const,
-    birthYear: 2019,
+    birthYear: null,
     status: 'ALIVE' as const,
-    biography: 'A young member of the T037A matriline, frequently observed traveling with mother and older siblings throughout the Salish Sea. The growth and stability of Bigg\'s matrilines like T037A reflects the resilience of marine-mammal-eating orca populations along the Pacific Northwest coast.',
+    biography: 'An estimated young member of the T037A matriline, documented in the past several years traveling with close relatives throughout the Salish Sea. The growth and stability of Bigg\'s matrilines like T037A reflects the resilience of marine-mammal-eating orca populations along the Pacific Northwest coast. Bigg\'s individual identification details are best maintained by the Bigg\'s Killer Whale ID Project; defer to that catalog for definitive information.',
   },
 ];
 
