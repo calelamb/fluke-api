@@ -1,0 +1,208 @@
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { FastifyInstance } from 'fastify';
+import sharp from 'sharp';
+import FormData from 'form-data';
+
+vi.mock('../db.js', () => ({
+  prisma: {
+    user: { findUnique: vi.fn() },
+    whale: { findMany: vi.fn(), findUnique: vi.fn() },
+    sighting: {
+      findMany: vi.fn(),
+      create: vi.fn(),
+      findUnique: vi.fn(),
+      update: vi.fn(),
+    },
+    sightingPhoto: {
+      count: vi.fn(),
+      create: vi.fn(),
+      findMany: vi.fn(),
+    },
+    sightingWhale: { upsert: vi.fn() },
+    auditLog: { create: vi.fn() },
+  },
+}));
+
+const { prisma } = await import('../db.js');
+
+let uploadsRoot: string;
+
+vi.mock('../lib/storage.js', async () => {
+  const actual = await vi.importActual<typeof import('../lib/storage.js')>('../lib/storage.js');
+  return {
+    ...actual,
+    resolveUploadsDir: () => uploadsRoot,
+    getStorageBackend: () =>
+      new actual.LocalDiskBackend({
+        rootDir: uploadsRoot,
+        apiOrigin: 'http://localhost:4000',
+      }),
+  };
+});
+
+const { buildApp } = await import('../app.js');
+
+const ADMIN = {
+  userId: 'admin-uuid',
+  email: 'admin@example.com',
+  role: 'ADMIN' as const,
+};
+
+async function buildPng(): Promise<Buffer> {
+  return sharp({
+    create: {
+      width: 64,
+      height: 48,
+      channels: 3,
+      background: { r: 30, g: 90, b: 140 },
+    },
+  })
+    .png()
+    .toBuffer();
+}
+
+describe('POST /api/v1/sightings/:id/photos', () => {
+  let app: FastifyInstance;
+  let adminToken: string;
+
+  beforeAll(async () => {
+    uploadsRoot = await mkdtemp(path.join(tmpdir(), 'fluke-photos-test-'));
+    app = await buildApp({ silent: true });
+    await app.ready();
+    adminToken = app.jwt.sign(ADMIN, { expiresIn: '7d' });
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await rm(uploadsRoot, { recursive: true, force: true });
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rejects unauthenticated upload with 401', async () => {
+    const png = await buildPng();
+    const form = new FormData();
+    form.append('file', png, { filename: 'a.png', contentType: 'image/png' });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/sightings/abc/photos',
+      payload: form,
+      headers: form.getHeaders(),
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(prisma.sightingPhoto.create).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when the sighting is missing', async () => {
+    vi.mocked(prisma.sighting.findUnique).mockResolvedValue(null);
+
+    const png = await buildPng();
+    const form = new FormData();
+    form.append('file', png, { filename: 'a.png', contentType: 'image/png' });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/sightings/missing/photos',
+      payload: form,
+      headers: { ...form.getHeaders(), cookie: `fluke_admin=${adminToken}` },
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('rejects unsupported content types with 415', async () => {
+    vi.mocked(prisma.sighting.findUnique).mockResolvedValue({ id: 's1' } as never);
+    vi.mocked(prisma.sightingPhoto.count).mockResolvedValue(0);
+
+    const form = new FormData();
+    form.append('file', Buffer.from('not an image'), {
+      filename: 'a.svg',
+      contentType: 'image/svg+xml',
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/sightings/s1/photos',
+      payload: form,
+      headers: { ...form.getHeaders(), cookie: `fluke_admin=${adminToken}` },
+    });
+
+    expect(response.statusCode).toBe(415);
+    expect(prisma.sightingPhoto.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects when sighting already has 5 photos', async () => {
+    vi.mocked(prisma.sighting.findUnique).mockResolvedValue({ id: 's1' } as never);
+    vi.mocked(prisma.sightingPhoto.count).mockResolvedValue(5);
+
+    const png = await buildPng();
+    const form = new FormData();
+    form.append('file', png, { filename: 'a.png', contentType: 'image/png' });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/sightings/s1/photos',
+      payload: form,
+      headers: { ...form.getHeaders(), cookie: `fluke_admin=${adminToken}` },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json<{ error: string }>().error).toMatch(/max 5/);
+  });
+
+  it('writes the 1024w + 256w variants to disk and persists a SightingPhoto row', async () => {
+    vi.mocked(prisma.sighting.findUnique).mockResolvedValue({ id: 's1' } as never);
+    vi.mocked(prisma.sightingPhoto.count).mockResolvedValue(0);
+    vi.mocked(prisma.sightingPhoto.create).mockResolvedValue({
+      id: 'photo-1',
+      url: 'placeholder',
+      thumbnailUrl: 'placeholder',
+      orderIndex: 0,
+    } as never);
+
+    const png = await buildPng();
+    const form = new FormData();
+    form.append('file', png, { filename: 'orca.png', contentType: 'image/png' });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/sightings/s1/photos',
+      payload: form,
+      headers: { ...form.getHeaders(), cookie: `fluke_admin=${adminToken}` },
+    });
+
+    expect(response.statusCode).toBe(201);
+
+    expect(prisma.sightingPhoto.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          sightingId: 's1',
+          orderIndex: 0,
+          url: expect.stringMatching(/^http:\/\/localhost:4000\/uploads\/sightings\/s1\/.+-1024\.webp$/),
+          thumbnailUrl: expect.stringMatching(
+            /^http:\/\/localhost:4000\/uploads\/sightings\/s1\/.+-256\.webp$/,
+          ),
+        }),
+      }),
+    );
+
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: 'UPLOAD_SIGHTING_PHOTO',
+        }),
+      }),
+    );
+
+    const written = await readdir(path.join(uploadsRoot, 'sightings/s1'));
+    expect(written.some((f) => f.endsWith('-1024.webp'))).toBe(true);
+    expect(written.some((f) => f.endsWith('-256.webp'))).toBe(true);
+  });
+});
