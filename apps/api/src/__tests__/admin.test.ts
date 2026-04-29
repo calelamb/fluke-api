@@ -66,6 +66,7 @@ describe('admin routes', () => {
           status: 'PENDING',
           createdAt: new Date('2026-04-26T12:00:00Z'),
           whales: [],
+          photos: [],
         },
       ] as never);
 

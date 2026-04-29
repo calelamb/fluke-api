@@ -64,6 +64,15 @@ async function buildPng(): Promise<Buffer> {
     .toBuffer();
 }
 
+function recentPendingSighting(overrides: Partial<{ id: string; status: string; createdAt: Date }> = {}) {
+  return {
+    id: 's1',
+    status: 'PENDING',
+    createdAt: new Date(Date.now() - 5 * 60 * 1000), // 5 min ago, well within window
+    ...overrides,
+  };
+}
+
 describe('POST /api/v1/sightings/:id/photos', () => {
   let app: FastifyInstance;
   let adminToken: string;
@@ -84,20 +93,114 @@ describe('POST /api/v1/sightings/:id/photos', () => {
     vi.clearAllMocks();
   });
 
-  it('rejects unauthenticated upload with 401', async () => {
-    const png = await buildPng();
-    const form = new FormData();
-    form.append('file', png, { filename: 'a.png', contentType: 'image/png' });
+  describe('public unauthenticated upload', () => {
+    it('accepts a photo on a recent PENDING sighting (within 30-min window)', async () => {
+      vi.mocked(prisma.sighting.findUnique).mockResolvedValue(recentPendingSighting() as never);
+      vi.mocked(prisma.sightingPhoto.count).mockResolvedValue(0);
+      vi.mocked(prisma.sightingPhoto.create).mockResolvedValue({
+        id: 'photo-1',
+        url: 'placeholder',
+        thumbnailUrl: 'placeholder',
+        orderIndex: 0,
+      } as never);
 
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/v1/sightings/abc/photos',
-      payload: form,
-      headers: form.getHeaders(),
+      const png = await buildPng();
+      const form = new FormData();
+      form.append('file', png, { filename: 'orca.png', contentType: 'image/png' });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/sightings/s1/photos',
+        payload: form,
+        headers: form.getHeaders(),
+      });
+
+      expect(response.statusCode).toBe(201);
+      // No audit log for public uploads.
+      expect(prisma.auditLog.create).not.toHaveBeenCalled();
     });
 
-    expect(response.statusCode).toBe(401);
-    expect(prisma.sightingPhoto.create).not.toHaveBeenCalled();
+    it('rejects with 403 when the sighting is APPROVED', async () => {
+      vi.mocked(prisma.sighting.findUnique).mockResolvedValue(
+        recentPendingSighting({ status: 'APPROVED' }) as never,
+      );
+
+      const png = await buildPng();
+      const form = new FormData();
+      form.append('file', png, { filename: 'a.png', contentType: 'image/png' });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/sightings/s1/photos',
+        payload: form,
+        headers: form.getHeaders(),
+      });
+
+      expect(response.statusCode).toBe(403);
+      expect(response.json<{ error: string }>().error).toMatch(/no longer accepting/i);
+      expect(prisma.sightingPhoto.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects with 403 when the sighting is older than the 30-min window', async () => {
+      vi.mocked(prisma.sighting.findUnique).mockResolvedValue(
+        recentPendingSighting({
+          createdAt: new Date(Date.now() - 60 * 60 * 1000), // 1 hour ago
+        }) as never,
+      );
+
+      const png = await buildPng();
+      const form = new FormData();
+      form.append('file', png, { filename: 'a.png', contentType: 'image/png' });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/sightings/s1/photos',
+        payload: form,
+        headers: form.getHeaders(),
+      });
+
+      expect(response.statusCode).toBe(403);
+      expect(response.json<{ error: string }>().error).toMatch(/window has closed/i);
+    });
+  });
+
+  describe('admin upload', () => {
+    it('accepts a photo with no time window or status restriction', async () => {
+      vi.mocked(prisma.sighting.findUnique).mockResolvedValue({
+        id: 's1',
+        status: 'APPROVED',
+        // 90 days ago — way past the public window, but admins can still upload
+        createdAt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000),
+      } as never);
+      vi.mocked(prisma.sightingPhoto.count).mockResolvedValue(0);
+      vi.mocked(prisma.sightingPhoto.create).mockResolvedValue({
+        id: 'photo-1',
+        url: 'placeholder',
+        thumbnailUrl: 'placeholder',
+        orderIndex: 0,
+      } as never);
+
+      const png = await buildPng();
+      const form = new FormData();
+      form.append('file', png, { filename: 'orca.png', contentType: 'image/png' });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/sightings/s1/photos',
+        payload: form,
+        headers: { ...form.getHeaders(), cookie: `fluke_admin=${adminToken}` },
+      });
+
+      expect(response.statusCode).toBe(201);
+      // Admin uploads write an audit log.
+      expect(prisma.auditLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            action: 'UPLOAD_SIGHTING_PHOTO',
+          }),
+        }),
+      );
+    });
   });
 
   it('returns 404 when the sighting is missing', async () => {
@@ -111,14 +214,14 @@ describe('POST /api/v1/sightings/:id/photos', () => {
       method: 'POST',
       url: '/api/v1/sightings/missing/photos',
       payload: form,
-      headers: { ...form.getHeaders(), cookie: `fluke_admin=${adminToken}` },
+      headers: form.getHeaders(),
     });
 
     expect(response.statusCode).toBe(404);
   });
 
   it('rejects unsupported content types with 415', async () => {
-    vi.mocked(prisma.sighting.findUnique).mockResolvedValue({ id: 's1' } as never);
+    vi.mocked(prisma.sighting.findUnique).mockResolvedValue(recentPendingSighting() as never);
     vi.mocked(prisma.sightingPhoto.count).mockResolvedValue(0);
 
     const form = new FormData();
@@ -131,7 +234,7 @@ describe('POST /api/v1/sightings/:id/photos', () => {
       method: 'POST',
       url: '/api/v1/sightings/s1/photos',
       payload: form,
-      headers: { ...form.getHeaders(), cookie: `fluke_admin=${adminToken}` },
+      headers: form.getHeaders(),
     });
 
     expect(response.statusCode).toBe(415);
@@ -139,7 +242,7 @@ describe('POST /api/v1/sightings/:id/photos', () => {
   });
 
   it('rejects when sighting already has 5 photos', async () => {
-    vi.mocked(prisma.sighting.findUnique).mockResolvedValue({ id: 's1' } as never);
+    vi.mocked(prisma.sighting.findUnique).mockResolvedValue(recentPendingSighting() as never);
     vi.mocked(prisma.sightingPhoto.count).mockResolvedValue(5);
 
     const png = await buildPng();
@@ -150,15 +253,15 @@ describe('POST /api/v1/sightings/:id/photos', () => {
       method: 'POST',
       url: '/api/v1/sightings/s1/photos',
       payload: form,
-      headers: { ...form.getHeaders(), cookie: `fluke_admin=${adminToken}` },
+      headers: form.getHeaders(),
     });
 
     expect(response.statusCode).toBe(400);
     expect(response.json<{ error: string }>().error).toMatch(/max 5/);
   });
 
-  it('writes the 1024w + 256w variants to disk and persists a SightingPhoto row', async () => {
-    vi.mocked(prisma.sighting.findUnique).mockResolvedValue({ id: 's1' } as never);
+  it('writes 1024w + 256w variants to disk and persists a SightingPhoto row', async () => {
+    vi.mocked(prisma.sighting.findUnique).mockResolvedValue(recentPendingSighting() as never);
     vi.mocked(prisma.sightingPhoto.count).mockResolvedValue(0);
     vi.mocked(prisma.sightingPhoto.create).mockResolvedValue({
       id: 'photo-1',
@@ -175,7 +278,7 @@ describe('POST /api/v1/sightings/:id/photos', () => {
       method: 'POST',
       url: '/api/v1/sightings/s1/photos',
       payload: form,
-      headers: { ...form.getHeaders(), cookie: `fluke_admin=${adminToken}` },
+      headers: form.getHeaders(),
     });
 
     expect(response.statusCode).toBe(201);
@@ -189,14 +292,6 @@ describe('POST /api/v1/sightings/:id/photos', () => {
           thumbnailUrl: expect.stringMatching(
             /^http:\/\/localhost:4000\/uploads\/sightings\/s1\/.+-256\.webp$/,
           ),
-        }),
-      }),
-    );
-
-    expect(prisma.auditLog.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          action: 'UPLOAD_SIGHTING_PHOTO',
         }),
       }),
     );

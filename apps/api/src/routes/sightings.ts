@@ -33,25 +33,32 @@ const sightingsRoutes: FastifyPluginAsync = async (fastify) => {
       },
     });
 
-    return sightings.map((sighting) => ({
-      id: sighting.id,
-      observedAt: sighting.observedAt.toISOString(),
-      latitude: Number(sighting.latitude),
-      longitude: Number(sighting.longitude),
-      locationName: sighting.locationName,
-      ecotypeGuess: sighting.ecotypeGuess,
-      groupSize: sighting.groupSize,
-      behaviorNotes: sighting.behaviorNotes,
-      status: sighting.status,
-      photoUrls: sighting.photos
-        .sort((a, b) => a.orderIndex - b.orderIndex)
-        .map((photo) => photo.url),
-      identifiedWhales: sighting.whales.map((sightingWhale) => ({
-        catalogId: sightingWhale.whale.catalogId,
-        name: sightingWhale.whale.name,
-        confidence: sightingWhale.confidence as IdConfidence,
-      })),
-    }));
+    return sightings.map((sighting) => {
+      const orderedPhotos = [...sighting.photos].sort((a, b) => a.orderIndex - b.orderIndex);
+      return {
+        id: sighting.id,
+        observedAt: sighting.observedAt.toISOString(),
+        latitude: Number(sighting.latitude),
+        longitude: Number(sighting.longitude),
+        locationName: sighting.locationName,
+        ecotypeGuess: sighting.ecotypeGuess,
+        groupSize: sighting.groupSize,
+        behaviorNotes: sighting.behaviorNotes,
+        status: sighting.status,
+        photoUrls: orderedPhotos.map((photo) => photo.url),
+        photos: orderedPhotos.map((photo) => ({
+          id: photo.id,
+          url: photo.url,
+          thumbnailUrl: photo.thumbnailUrl,
+          orderIndex: photo.orderIndex,
+        })),
+        identifiedWhales: sighting.whales.map((sightingWhale) => ({
+          catalogId: sightingWhale.whale.catalogId,
+          name: sightingWhale.whale.name,
+          confidence: sightingWhale.confidence as IdConfidence,
+        })),
+      };
+    });
   });
 
   fastify.post(

@@ -25,6 +25,12 @@ function toPendingSightingDTO(sighting: {
     confidence: PendingSightingDTO['identifiedWhales'][number]['confidence'];
     whale: { catalogId: string; name: string | null };
   }>;
+  photos: Array<{
+    id: string;
+    url: string;
+    thumbnailUrl: string;
+    orderIndex: number;
+  }>;
 }): PendingSightingDTO {
   return {
     id: sighting.id,
@@ -44,6 +50,12 @@ function toPendingSightingDTO(sighting: {
       name: sightingWhale.whale.name,
       confidence: sightingWhale.confidence,
     })),
+    photos: sighting.photos.map((photo) => ({
+      id: photo.id,
+      url: photo.url,
+      thumbnailUrl: photo.thumbnailUrl,
+      orderIndex: photo.orderIndex,
+    })),
   };
 }
 
@@ -58,7 +70,10 @@ export default async function adminRoutes(app: FastifyInstance) {
       where: { status: parsed.data.status },
       orderBy: { createdAt: 'desc' },
       take: 100,
-      include: { whales: { include: { whale: true } } },
+      include: {
+        whales: { include: { whale: true } },
+        photos: { orderBy: { orderIndex: 'asc' } },
+      },
     });
 
     return sightings.map(toPendingSightingDTO);

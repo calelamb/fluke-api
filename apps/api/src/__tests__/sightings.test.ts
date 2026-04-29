@@ -51,8 +51,8 @@ describe('sightings routes', () => {
           behaviorNotes: null,
           status: 'APPROVED',
           photos: [
-            { url: 'https://cdn/photo-1.jpg', orderIndex: 1 },
-            { url: 'https://cdn/photo-0.jpg', orderIndex: 0 },
+            { id: 'p1', url: 'https://cdn/photo-1.jpg', thumbnailUrl: 'https://cdn/photo-1-thumb.jpg', orderIndex: 1 },
+            { id: 'p0', url: 'https://cdn/photo-0.jpg', thumbnailUrl: 'https://cdn/photo-0-thumb.jpg', orderIndex: 0 },
           ],
           whales: [
             {
@@ -71,6 +71,7 @@ describe('sightings routes', () => {
           id: string;
           status: string;
           photoUrls: string[];
+          photos: Array<{ id: string; url: string; thumbnailUrl: string; orderIndex: number }>;
           identifiedWhales: Array<{ catalogId: string }>;
         }>
       >();
@@ -79,6 +80,10 @@ describe('sightings routes', () => {
       expect(body[0].status).toBe('APPROVED');
       // Photos must be sorted by orderIndex ascending.
       expect(body[0].photoUrls).toEqual([
+        'https://cdn/photo-0.jpg',
+        'https://cdn/photo-1.jpg',
+      ]);
+      expect(body[0].photos.map((p) => p.url)).toEqual([
         'https://cdn/photo-0.jpg',
         'https://cdn/photo-1.jpg',
       ]);

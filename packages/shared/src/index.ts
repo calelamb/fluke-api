@@ -66,12 +66,24 @@ export interface SightingDTO {
   groupSize: number | null;
   behaviorNotes: string | null;
   status: SightingStatus;
+  /**
+   * Convenience: large-image URLs in display order. Mirrors `photos[].url`
+   * for callers that just want to preload images.
+   */
   photoUrls: string[];
+  photos: SightingPhotoDTO[];
   identifiedWhales: Array<{
     catalogId: string;
     name: string | null;
     confidence: IdConfidence;
   }>;
+}
+
+export interface SightingPhotoDTO {
+  id: string;
+  url: string;
+  thumbnailUrl: string;
+  orderIndex: number;
 }
 
 export interface PendingSightingDTO {
@@ -92,6 +104,7 @@ export interface PendingSightingDTO {
     name: string | null;
     confidence: IdConfidence;
   }>;
+  photos: SightingPhotoDTO[];
 }
 
 export interface SubmitSightingPayload {
