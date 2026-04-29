@@ -1,20 +1,54 @@
 import type { AdminClaims } from '../lib/auth.js';
-import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyPluginAsync, FastifyRequest } from 'fastify';
 import sharp from 'sharp';
 import { prisma } from '../db.js';
 import { requireAdmin } from '../lib/auth.js';
 import { buildPhotoFilename, getStorageBackend } from '../lib/storage.js';
+import {
+  PHOTO_UPLOAD_TOKEN_TYPE,
+  type PhotoUploadTokenPayload,
+} from './sightings.js';
 
 const MAX_PHOTOS_PER_SIGHTING = 5;
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
 const ACCEPTED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const PUBLIC_UPLOAD_WINDOW_MS = 30 * 60 * 1000; // 30 minutes after sighting create
+const PHOTO_UPLOAD_TOKEN_HEADER = 'x-photo-upload-token';
 
 async function getOptionalAdmin(req: FastifyRequest): Promise<AdminClaims | null> {
   try {
     return await req.jwtVerify<AdminClaims>();
   } catch {
     return null;
+  }
+}
+
+/**
+ * Verifies a `X-Photo-Upload-Token` header (if present) against the path's
+ * sighting id. Returns true only when the token is valid, scoped to this
+ * sighting, and carries the photo-upload type claim. A missing header
+ * returns false; a malformed/expired/mismatched token also returns false
+ * (the caller decides how to fall back).
+ */
+function verifyPhotoUploadToken(
+  fastify: FastifyInstance,
+  req: FastifyRequest,
+  sightingId: string,
+): { ok: true } | { ok: false; reason: 'missing' | 'invalid' } {
+  const raw = req.headers[PHOTO_UPLOAD_TOKEN_HEADER];
+  const token = Array.isArray(raw) ? raw[0] : raw;
+  if (!token) return { ok: false, reason: 'missing' };
+  try {
+    const payload = fastify.jwt.verify<PhotoUploadTokenPayload>(token);
+    if (payload.type !== PHOTO_UPLOAD_TOKEN_TYPE) {
+      return { ok: false, reason: 'invalid' };
+    }
+    if (payload.sightingId !== sightingId) {
+      return { ok: false, reason: 'invalid' };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: 'invalid' };
   }
 }
 
@@ -38,6 +72,14 @@ const sightingPhotosRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const { id: sightingId } = request.params;
       const admin = await getOptionalAdmin(request);
+      const tokenResult = verifyPhotoUploadToken(fastify, request, sightingId);
+
+      // If a token header was supplied but failed verification (mismatched
+      // sighting id, wrong type, expired, malformed), reject before doing any
+      // DB work. This makes offline-replay failures explicit and observable.
+      if (tokenResult.ok === false && tokenResult.reason === 'invalid') {
+        return reply.code(403).send({ error: 'Invalid photo upload token.' });
+      }
 
       const sighting = await prisma.sighting.findUnique({ where: { id: sightingId } });
       if (!sighting) {
@@ -45,18 +87,22 @@ const sightingPhotosRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       // Public uploads have to land within the submission window and only on
-      // PENDING rows. Admins skip this gate.
+      // PENDING rows. Admins skip this gate. A valid signed photo-upload token
+      // also bypasses the time-window check (but still requires PENDING) so
+      // queued offline submissions can replay past the 30-minute mark.
       if (!admin) {
         if (sighting.status !== 'PENDING') {
           return reply
             .code(403)
             .send({ error: 'This sighting is no longer accepting photo uploads.' });
         }
-        const ageMs = Date.now() - sighting.createdAt.getTime();
-        if (ageMs > PUBLIC_UPLOAD_WINDOW_MS) {
-          return reply
-            .code(403)
-            .send({ error: 'Photo upload window has closed for this sighting.' });
+        if (!tokenResult.ok) {
+          const ageMs = Date.now() - sighting.createdAt.getTime();
+          if (ageMs > PUBLIC_UPLOAD_WINDOW_MS) {
+            return reply
+              .code(403)
+              .send({ error: 'Photo upload window has closed for this sighting.' });
+          }
         }
       }
 

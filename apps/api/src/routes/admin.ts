@@ -1,8 +1,75 @@
-import type { PendingSightingDTO } from '@fluke/shared';
+import type {
+  LabelablePhotoDTO,
+  PendingSightingDTO,
+  PhotoAnnotationDTO,
+  PhotoAnnotationPayload,
+} from '@fluke/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import { requireAdmin } from '../lib/auth.js';
+
+const PhotoQualityEnum = z.enum([
+  'USABLE',
+  'OCCLUDED',
+  'MOTION_BLUR',
+  'WRONG_ANGLE',
+  'TOO_DISTANT',
+  'NOT_ORCA',
+]);
+
+const ConfidenceEnum = z.enum(['CONFIRMED', 'LIKELY', 'ML_SUGGESTED']);
+
+const BoxSchema = z.object({
+  x: z.number().finite().nonnegative(),
+  y: z.number().finite().nonnegative(),
+  w: z.number().finite().positive(),
+  h: z.number().finite().positive(),
+});
+
+const AnnotationPayloadSchema = z.object({
+  dorsal_fin: BoxSchema.optional(),
+  saddle_patch: BoxSchema.optional(),
+});
+
+const AnnotateBody = z.object({
+  quality: PhotoQualityEnum,
+  whaleCatalogId: z.string().min(1).optional().nullable(),
+  confidence: ConfidenceEnum.optional().nullable(),
+  payload: AnnotationPayloadSchema.optional(),
+  notes: z.string().max(500).optional().nullable(),
+  done: z.boolean().optional(),
+});
+
+function toAnnotationDTO(annotation: {
+  id: string;
+  photoId: string;
+  version: number;
+  quality: PhotoAnnotationDTO['quality'];
+  payload: unknown;
+  whale: { catalogId: string; name: string | null } | null;
+  confidence: PhotoAnnotationDTO['confidence'];
+  notes: string | null;
+  done: boolean;
+  labeledById: string;
+  labeledAt: Date;
+}): PhotoAnnotationDTO {
+  const payload = (annotation.payload ?? {}) as PhotoAnnotationPayload;
+  return {
+    id: annotation.id,
+    photoId: annotation.photoId,
+    version: annotation.version,
+    quality: annotation.quality,
+    whaleCatalogId: annotation.whale?.catalogId ?? null,
+    whaleName: annotation.whale?.name ?? null,
+    confidence: annotation.confidence,
+    payload,
+    notes: annotation.notes,
+    done: annotation.done,
+    labeledById: annotation.labeledById,
+    labeledAt: annotation.labeledAt.toISOString(),
+  };
+}
 
 const StatusQuery = z.object({
   status: z.enum(['PENDING', 'APPROVED', 'REJECTED']).default('PENDING'),
@@ -157,4 +224,150 @@ export default async function adminRoutes(app: FastifyInstance) {
 
     return { ok: true };
   });
+
+  // ---- Photo labeling pipeline (M-Label-1) -------------------------------
+
+  const PendingPhotosQuery = z.object({
+    limit: z.coerce.number().int().min(1).max(200).default(50),
+  });
+
+  app.get(
+    '/photos/pending',
+    { preHandler: requireAdmin },
+    async (req, reply): Promise<LabelablePhotoDTO[] | void> => {
+      const parsed = PendingPhotosQuery.safeParse(req.query);
+      if (!parsed.success) return reply.code(400).send({ error: 'invalid query' });
+
+      const photos = await prisma.sightingPhoto.findMany({
+        where: { done: false },
+        orderBy: { sighting: { createdAt: 'desc' } },
+        take: parsed.data.limit,
+        include: {
+          sighting: {
+            select: {
+              id: true,
+              observedAt: true,
+              locationName: true,
+              observerEmail: true,
+            },
+          },
+          annotations: {
+            orderBy: { version: 'desc' },
+            take: 1,
+            include: { whale: { select: { catalogId: true, name: true } } },
+          },
+        },
+      });
+
+      return photos.map((photo) => ({
+        id: photo.id,
+        url: photo.url,
+        thumbnailUrl: photo.thumbnailUrl,
+        orderIndex: photo.orderIndex,
+        done: photo.done,
+        createdAt: photo.createdAt.toISOString(),
+        sighting: {
+          id: photo.sighting.id,
+          observedAt: photo.sighting.observedAt.toISOString(),
+          locationName: photo.sighting.locationName,
+          observerEmail: photo.sighting.observerEmail,
+        },
+        latestAnnotation: photo.annotations[0]
+          ? toAnnotationDTO(photo.annotations[0])
+          : null,
+      }));
+    },
+  );
+
+  app.get<{ Params: { photoId: string } }>(
+    '/photos/:photoId/annotations',
+    { preHandler: requireAdmin },
+    async (req, reply): Promise<PhotoAnnotationDTO[] | void> => {
+      const photo = await prisma.sightingPhoto.findUnique({ where: { id: req.params.photoId } });
+      if (!photo) return reply.code(404).send({ error: 'Not found' });
+
+      const annotations = await prisma.photoAnnotation.findMany({
+        where: { photoId: req.params.photoId },
+        orderBy: { version: 'desc' },
+        include: { whale: { select: { catalogId: true, name: true } } },
+      });
+
+      return annotations.map(toAnnotationDTO);
+    },
+  );
+
+  app.post<{ Params: { photoId: string } }>(
+    '/photos/:photoId/annotate',
+    { preHandler: requireAdmin },
+    async (req, reply) => {
+      const parsed = AnnotateBody.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ error: 'invalid body' });
+
+      const photo = await prisma.sightingPhoto.findUnique({
+        where: { id: req.params.photoId },
+      });
+      if (!photo) return reply.code(404).send({ error: 'Not found' });
+
+      let whaleId: string | null = null;
+      if (parsed.data.whaleCatalogId) {
+        const whale = await prisma.whale.findUnique({
+          where: { catalogId: parsed.data.whaleCatalogId },
+        });
+        if (!whale) return reply.code(404).send({ error: 'Whale not found' });
+        whaleId = whale.id;
+      }
+
+      const latest = await prisma.photoAnnotation.findFirst({
+        where: { photoId: req.params.photoId },
+        orderBy: { version: 'desc' },
+        select: { version: true },
+      });
+      const nextVersion = (latest?.version ?? 0) + 1;
+      const done = parsed.data.done ?? false;
+      const payload = parsed.data.payload ?? {};
+
+      const annotation = await prisma.photoAnnotation.create({
+        data: {
+          photoId: req.params.photoId,
+          version: nextVersion,
+          quality: parsed.data.quality,
+          payload,
+          whaleId,
+          confidence: parsed.data.confidence ?? null,
+          notes: parsed.data.notes ?? null,
+          done,
+          labeledById: req.admin!.userId,
+        },
+        include: { whale: { select: { catalogId: true, name: true } } },
+      });
+
+      // Mirror the `done` flag onto the parent photo so the queue query stays
+      // a simple `where: { done: false }` lookup.
+      if (done !== photo.done) {
+        await prisma.sightingPhoto.update({
+          where: { id: req.params.photoId },
+          data: { done },
+        });
+      }
+
+      await prisma.auditLog.create({
+        data: {
+          userId: req.admin!.userId,
+          action: 'LABEL_PHOTO',
+          entityType: 'sighting_photo',
+          entityId: req.params.photoId,
+          metadata: {
+            version: nextVersion,
+            quality: parsed.data.quality,
+            whaleCatalogId: parsed.data.whaleCatalogId ?? null,
+            confidence: parsed.data.confidence ?? null,
+            payload,
+            done,
+          },
+        },
+      });
+
+      return reply.code(201).send(toAnnotationDTO(annotation));
+    },
+  );
 }

@@ -109,7 +109,7 @@ describe('sightings routes', () => {
       observerEmail: 'observer@example.com',
     };
 
-    it('creates a new sighting with PENDING status', async () => {
+    it('creates a new sighting with PENDING status and returns a photo-upload token', async () => {
       vi.mocked(prisma.sighting.create).mockResolvedValue({ id: 'new-sighting-id' } as never);
 
       const response = await app.inject({
@@ -119,7 +119,15 @@ describe('sightings routes', () => {
       });
 
       expect(response.statusCode).toBe(201);
-      expect(response.json()).toEqual({ ok: true, id: 'new-sighting-id' });
+      const body = response.json<{ ok: true; id: string; photoUploadToken: string }>();
+      expect(body.ok).toBe(true);
+      expect(body.id).toBe('new-sighting-id');
+      expect(body.photoUploadToken).toBeTypeOf('string');
+      expect(body.photoUploadToken.length).toBeGreaterThan(0);
+      // Verify the token round-trips and carries the expected claims.
+      const decoded = app.jwt.verify<{ sightingId: string; type: string }>(body.photoUploadToken);
+      expect(decoded.sightingId).toBe('new-sighting-id');
+      expect(decoded.type).toBe('photo-upload');
 
       expect(prisma.sighting.create).toHaveBeenCalledWith(
         expect.objectContaining({

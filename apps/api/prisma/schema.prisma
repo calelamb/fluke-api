@@ -44,6 +44,15 @@ enum UserRole {
   MODERATOR
 }
 
+enum PhotoQuality {
+  USABLE
+  OCCLUDED
+  MOTION_BLUR
+  WRONG_ANGLE
+  TOO_DISTANT
+  NOT_ORCA
+}
+
 model Whale {
   id                    String          @id @default(uuid())
   catalogId             String          @unique @map("catalog_id")
@@ -63,6 +72,7 @@ model Whale {
   notableEvents         Json?           @map("notable_events")
   sourceCitations       Json?           @map("source_citations")
   sightings             SightingWhale[]
+  annotations           PhotoAnnotation[]
   createdAt             DateTime        @default(now()) @map("created_at")
   updatedAt             DateTime        @updatedAt @map("updated_at")
 
@@ -96,16 +106,42 @@ model Sighting {
 }
 
 model SightingPhoto {
-  id            String    @id @default(uuid())
-  sightingId    String    @map("sighting_id")
-  sighting      Sighting  @relation(fields: [sightingId], references: [id], onDelete: Cascade)
-  storageKey    String    @map("storage_key")
+  id            String            @id @default(uuid())
+  sightingId    String            @map("sighting_id")
+  sighting      Sighting          @relation(fields: [sightingId], references: [id], onDelete: Cascade)
+  storageKey    String            @map("storage_key")
   url           String
-  thumbnailUrl  String    @map("thumbnail_url")
-  orderIndex    Int       @default(0) @map("order_index")
-  createdAt     DateTime  @default(now()) @map("created_at")
+  thumbnailUrl  String            @map("thumbnail_url")
+  orderIndex    Int               @default(0) @map("order_index")
+  done          Boolean           @default(false)
+  annotations   PhotoAnnotation[]
+  createdAt     DateTime          @default(now()) @map("created_at")
 
+  @@index([done])
   @@map("sighting_photos")
+}
+
+model PhotoAnnotation {
+  id            String         @id @default(uuid())
+  photoId       String         @map("photo_id")
+  photo         SightingPhoto  @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  version       Int            @default(1)
+  quality       PhotoQuality
+  payload       Json
+  whaleId       String?        @map("whale_id")
+  whale         Whale?         @relation(fields: [whaleId], references: [id], onDelete: SetNull)
+  confidence    IdConfidence?
+  notes         String?
+  done          Boolean        @default(false)
+  labeledById   String         @map("labeled_by")
+  labeledBy     User           @relation(fields: [labeledById], references: [id], onDelete: Restrict)
+  labeledAt     DateTime       @default(now()) @map("labeled_at")
+
+  @@unique([photoId, version])
+  @@index([photoId, version(sort: Desc)])
+  @@index([done])
+  @@index([whaleId])
+  @@map("photo_annotations")
 }
 
 model SightingWhale {
@@ -122,13 +158,14 @@ model SightingWhale {
 }
 
 model User {
-  id            String     @id @default(uuid())
-  email         String     @unique
-  passwordHash  String     @map("password_hash")
-  role          UserRole   @default(MODERATOR)
-  sightings     Sighting[]
-  auditLogs     AuditLog[]
-  createdAt     DateTime   @default(now()) @map("created_at")
+  id              String            @id @default(uuid())
+  email           String            @unique
+  passwordHash    String            @map("password_hash")
+  role            UserRole          @default(MODERATOR)
+  sightings       Sighting[]
+  auditLogs       AuditLog[]
+  photoAnnotations PhotoAnnotation[]
+  createdAt       DateTime          @default(now()) @map("created_at")
 
   @@map("users")
 }

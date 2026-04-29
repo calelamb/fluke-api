@@ -1,7 +1,22 @@
-import type { IdConfidence, SightingDTO } from '@fluke/shared';
+import type { IdConfidence, SightingDTO, SubmitSightingResponse } from '@fluke/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../db.js';
+
+/**
+ * Photo-upload tokens are scoped to a specific sighting and to the
+ * photo-upload action. They allow the offline submission queue to replay
+ * photo POSTs after the public 30-minute upload window has closed without
+ * exposing admin-level access. The 24-hour TTL is generous enough to cover a
+ * ferry crossing and overnight without service.
+ */
+const PHOTO_UPLOAD_TOKEN_TTL = '24h';
+export const PHOTO_UPLOAD_TOKEN_TYPE = 'photo-upload';
+
+export interface PhotoUploadTokenPayload {
+  sightingId: string;
+  type: typeof PHOTO_UPLOAD_TOKEN_TYPE;
+}
 
 const notImplemented = {
   error: 'Not implemented; reserved for future user-account work',
@@ -90,7 +105,20 @@ const sightingsRoutes: FastifyPluginAsync = async (fastify) => {
         },
       });
 
-      return reply.code(201).send({ ok: true, id: sighting.id });
+      const tokenPayload: PhotoUploadTokenPayload = {
+        sightingId: sighting.id,
+        type: PHOTO_UPLOAD_TOKEN_TYPE,
+      };
+      const photoUploadToken = fastify.jwt.sign(tokenPayload, {
+        expiresIn: PHOTO_UPLOAD_TOKEN_TTL,
+      });
+
+      const responseBody: SubmitSightingResponse = {
+        ok: true,
+        id: sighting.id,
+        photoUploadToken,
+      };
+      return reply.code(201).send(responseBody);
     },
   );
   fastify.put('/sightings/:id', async (_request, reply) => reply.code(501).send(notImplemented));

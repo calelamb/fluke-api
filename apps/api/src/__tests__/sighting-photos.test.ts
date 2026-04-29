@@ -93,6 +93,119 @@ describe('POST /api/v1/sightings/:id/photos', () => {
     vi.clearAllMocks();
   });
 
+  describe('photo-upload token (offline replay)', () => {
+    it('allows public upload past the 30-min window when a valid token is supplied', async () => {
+      vi.mocked(prisma.sighting.findUnique).mockResolvedValue(
+        recentPendingSighting({
+          createdAt: new Date(Date.now() - 6 * 60 * 60 * 1000), // 6 hours ago
+        }) as never,
+      );
+      vi.mocked(prisma.sightingPhoto.count).mockResolvedValue(0);
+      vi.mocked(prisma.sightingPhoto.create).mockResolvedValue({
+        id: 'photo-1',
+        url: 'placeholder',
+        thumbnailUrl: 'placeholder',
+        orderIndex: 0,
+      } as never);
+
+      const token = app.jwt.sign(
+        { sightingId: 's1', type: 'photo-upload' },
+        { expiresIn: '24h' },
+      );
+
+      const png = await buildPng();
+      const form = new FormData();
+      form.append('file', png, { filename: 'orca.png', contentType: 'image/png' });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/sightings/s1/photos',
+        payload: form,
+        headers: { ...form.getHeaders(), 'x-photo-upload-token': token },
+      });
+
+      expect(response.statusCode).toBe(201);
+      // No audit log — token-bypass paths are still public uploads.
+      expect(prisma.auditLog.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects with 403 when the token is for a different sightingId', async () => {
+      const token = app.jwt.sign(
+        { sightingId: 'different-sighting', type: 'photo-upload' },
+        { expiresIn: '24h' },
+      );
+
+      const png = await buildPng();
+      const form = new FormData();
+      form.append('file', png, { filename: 'a.png', contentType: 'image/png' });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/sightings/s1/photos',
+        payload: form,
+        headers: { ...form.getHeaders(), 'x-photo-upload-token': token },
+      });
+
+      expect(response.statusCode).toBe(403);
+      expect(response.json<{ error: string }>().error).toMatch(/invalid photo upload token/i);
+      // Should bail before touching the DB.
+      expect(prisma.sighting.findUnique).not.toHaveBeenCalled();
+      expect(prisma.sightingPhoto.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects with 403 when the token has expired', async () => {
+      // Mock jwt.verify to throw a TokenExpiredError-like error.
+      const originalVerify = app.jwt.verify;
+      const verifySpy = vi.spyOn(app.jwt, 'verify').mockImplementation(() => {
+        throw new Error('jwt expired');
+      });
+
+      const png = await buildPng();
+      const form = new FormData();
+      form.append('file', png, { filename: 'a.png', contentType: 'image/png' });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/sightings/s1/photos',
+        payload: form,
+        headers: {
+          ...form.getHeaders(),
+          'x-photo-upload-token': 'any.token.value',
+        },
+      });
+
+      expect(response.statusCode).toBe(403);
+      expect(response.json<{ error: string }>().error).toMatch(/invalid photo upload token/i);
+      expect(prisma.sightingPhoto.create).not.toHaveBeenCalled();
+
+      verifySpy.mockRestore();
+      // Restore original (defensive — mockRestore should already do this).
+      app.jwt.verify = originalVerify;
+    });
+
+    it('rejects with 403 when the token has the wrong type claim', async () => {
+      const token = app.jwt.sign(
+        { sightingId: 's1', type: 'admin-session' },
+        { expiresIn: '24h' },
+      );
+
+      const png = await buildPng();
+      const form = new FormData();
+      form.append('file', png, { filename: 'a.png', contentType: 'image/png' });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/sightings/s1/photos',
+        payload: form,
+        headers: { ...form.getHeaders(), 'x-photo-upload-token': token },
+      });
+
+      expect(response.statusCode).toBe(403);
+      expect(response.json<{ error: string }>().error).toMatch(/invalid photo upload token/i);
+      expect(prisma.sightingPhoto.create).not.toHaveBeenCalled();
+    });
+  });
+
   describe('public unauthenticated upload', () => {
     it('accepts a photo on a recent PENDING sighting (within 30-min window)', async () => {
       vi.mocked(prisma.sighting.findUnique).mockResolvedValue(recentPendingSighting() as never);

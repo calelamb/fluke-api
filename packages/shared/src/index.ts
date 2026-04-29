@@ -3,6 +3,15 @@ export type Sex = 'MALE' | 'FEMALE' | 'UNKNOWN';
 export type WhaleStatus = 'ALIVE' | 'DECEASED' | 'UNKNOWN';
 export type SightingStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type IdConfidence = 'CONFIRMED' | 'LIKELY' | 'ML_SUGGESTED';
+export type PhotoQuality =
+  | 'USABLE'
+  | 'OCCLUDED'
+  | 'MOTION_BLUR'
+  | 'WRONG_ANGLE'
+  | 'TOO_DISTANT'
+  | 'NOT_ORCA';
+
+export const LABEL_PHOTO_AUDIT_ACTION = 'LABEL_PHOTO' as const;
 
 export type NotableEventType =
   | 'birth'
@@ -117,6 +126,71 @@ export interface SubmitSightingPayload {
   behaviorNotes?: string | null;
   observerName?: string | null;
   observerEmail: string;
+}
+
+/**
+ * Response from POST /api/v1/sightings. The `photoUploadToken` is a JWT
+ * scoped to this sighting and the photo-upload action; the offline submission
+ * queue replays photo uploads with this token so they can land past the
+ * 30-minute public upload window.
+ */
+export interface SubmitSightingResponse {
+  ok: true;
+  id: string;
+  photoUploadToken: string;
+}
+
+/**
+ * Bounding-box payload stored on a `PhotoAnnotation`. Pixel-space coordinates
+ * relative to the original (not thumbnail) photo. Both boxes optional — a
+ * `NOT_ORCA` photo carries `{}` and `boxes` is empty.
+ */
+export interface PhotoAnnotationBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface PhotoAnnotationPayload {
+  dorsal_fin?: PhotoAnnotationBox;
+  saddle_patch?: PhotoAnnotationBox;
+}
+
+export interface PhotoAnnotationDTO {
+  id: string;
+  photoId: string;
+  version: number;
+  quality: PhotoQuality;
+  whaleCatalogId: string | null;
+  whaleName: string | null;
+  confidence: IdConfidence | null;
+  payload: PhotoAnnotationPayload;
+  notes: string | null;
+  done: boolean;
+  labeledById: string;
+  labeledAt: string;
+}
+
+/**
+ * Photo waiting on (or already partially through) labeling. Surfaced by the
+ * admin label queue. `latestAnnotation` is the highest-version annotation
+ * row for the photo, or null if none exist yet.
+ */
+export interface LabelablePhotoDTO {
+  id: string;
+  url: string;
+  thumbnailUrl: string;
+  orderIndex: number;
+  done: boolean;
+  createdAt: string;
+  sighting: {
+    id: string;
+    observedAt: string;
+    locationName: string | null;
+    observerEmail: string;
+  };
+  latestAnnotation: PhotoAnnotationDTO | null;
 }
 
 export interface ExternalSightingDTO {
