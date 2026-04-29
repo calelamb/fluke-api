@@ -13,7 +13,6 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
-    "db:seed:sightings": "tsx prisma/seed-sightings.ts",
     "db:create-admin": "tsx scripts/create-admin.ts",
     "db:studio": "prisma studio",
     "ingest:acartia": "tsx scripts/ingest-acartia.ts"
