@@ -10,6 +10,8 @@ export type PhotoQuality =
   | 'WRONG_ANGLE'
   | 'TOO_DISTANT'
   | 'NOT_ORCA';
+export type ReferencePhotoSide = 'LEFT' | 'RIGHT' | 'UNKNOWN';
+export type EmbeddingStatus = 'PENDING' | 'EMBEDDED' | 'FAILED';
 
 export const LABEL_PHOTO_AUDIT_ACTION = 'LABEL_PHOTO' as const;
 
@@ -191,6 +193,42 @@ export interface LabelablePhotoDTO {
     observerEmail: string;
   };
   latestAnnotation: PhotoAnnotationDTO | null;
+}
+
+export interface WhaleReferencePhotoDTO {
+  id: string;
+  whaleId: string;
+  catalogId: string;
+  whaleName: string | null;
+  url: string;
+  side: ReferencePhotoSide;
+  quality: PhotoQuality;
+  cropX: number | null;
+  cropY: number | null;
+  cropWidth: number | null;
+  cropHeight: number | null;
+  embeddingStatus: EmbeddingStatus;
+  notes: string | null;
+  createdAt: string;
+}
+
+export type IdentifyConfidenceBand = 'high' | 'medium' | 'low' | 'unavailable';
+
+export interface IdentifyMatchDTO {
+  catalogId: string;
+  name: string | null;
+  score: number;
+  rank: number;
+  matchedReferencePhotoIds: string[];
+  explanation: string;
+}
+
+export interface IdentifyResponseDTO {
+  matches: IdentifyMatchDTO[];
+  confidenceBand: IdentifyConfidenceBand;
+  model: string;
+  indexVersion: string;
+  uploadUrl?: string;
 }
 
 export interface ExternalSightingDTO {

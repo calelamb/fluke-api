@@ -32,6 +32,7 @@ const envSchema = z
      * the production API host (e.g. https://api.fluke.example) in prod.
      */
     API_PUBLIC_ORIGIN: z.string().url().default('http://localhost:4000'),
+    IDENTIFIER_SERVICE_URL: z.string().url().default('http://localhost:4100'),
 
     R2_BUCKET: z.string().optional(),
     R2_ENDPOINT: z.string().url().optional(),

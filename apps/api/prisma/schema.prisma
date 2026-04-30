@@ -53,6 +53,18 @@ enum PhotoQuality {
   NOT_ORCA
 }
 
+enum ReferencePhotoSide {
+  LEFT
+  RIGHT
+  UNKNOWN
+}
+
+enum EmbeddingStatus {
+  PENDING
+  EMBEDDED
+  FAILED
+}
+
 model Whale {
   id                    String          @id @default(uuid())
   catalogId             String          @unique @map("catalog_id")
@@ -73,6 +85,7 @@ model Whale {
   sourceCitations       Json?           @map("source_citations")
   sightings             SightingWhale[]
   annotations           PhotoAnnotation[]
+  referencePhotos       WhaleReferencePhoto[]
   createdAt             DateTime        @default(now()) @map("created_at")
   updatedAt             DateTime        @updatedAt @map("updated_at")
 
@@ -119,6 +132,27 @@ model SightingPhoto {
 
   @@index([done])
   @@map("sighting_photos")
+}
+
+model WhaleReferencePhoto {
+  id              String              @id @default(uuid())
+  whaleId         String              @map("whale_id")
+  whale           Whale               @relation(fields: [whaleId], references: [id], onDelete: Cascade)
+  storageKey      String              @map("storage_key")
+  url             String
+  side            ReferencePhotoSide  @default(UNKNOWN)
+  quality         PhotoQuality        @default(USABLE)
+  cropX           Float?              @map("crop_x")
+  cropY           Float?              @map("crop_y")
+  cropWidth       Float?              @map("crop_width")
+  cropHeight      Float?              @map("crop_height")
+  embeddingStatus EmbeddingStatus     @default(PENDING) @map("embedding_status")
+  notes           String?
+  createdAt       DateTime            @default(now()) @map("created_at")
+
+  @@index([whaleId])
+  @@index([embeddingStatus])
+  @@map("whale_reference_photos")
 }
 
 model PhotoAnnotation {
@@ -182,6 +216,17 @@ model AuditLog {
 
   @@index([userId, createdAt(sort: Desc)])
   @@map("audit_log")
+}
+
+model IdentificationAttempt {
+  id            String   @id @default(uuid())
+  uploadKey     String   @map("upload_key")
+  uploadUrl     String   @map("upload_url")
+  resultJson    Json     @map("result_json")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt(sort: Desc)])
+  @@map("identification_attempts")
 }
 
 // External sighting feeds (Acartia, Orcasound, etc.) live in their own table

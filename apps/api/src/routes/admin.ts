@@ -3,11 +3,15 @@ import type {
   PendingSightingDTO,
   PhotoAnnotationDTO,
   PhotoAnnotationPayload,
+  WhaleReferencePhotoDTO,
 } from '@fluke/shared';
 import type { FastifyInstance } from 'fastify';
+import sharp from 'sharp';
 import { z } from 'zod';
 import { prisma } from '../db.js';
+import { env } from '../env.js';
 import { requireAdmin } from '../lib/auth.js';
+import { buildPhotoFilename, getStorageBackend } from '../lib/storage.js';
 
 const PhotoQualityEnum = z.enum([
   'USABLE',
@@ -19,6 +23,8 @@ const PhotoQualityEnum = z.enum([
 ]);
 
 const ConfidenceEnum = z.enum(['CONFIRMED', 'LIKELY', 'ML_SUGGESTED']);
+const ReferencePhotoSideEnum = z.enum(['LEFT', 'RIGHT', 'UNKNOWN']);
+const EmbeddingStatusEnum = z.enum(['PENDING', 'EMBEDDED', 'FAILED']);
 
 const BoxSchema = z.object({
   x: z.number().finite().nonnegative(),
@@ -123,6 +129,39 @@ function toPendingSightingDTO(sighting: {
       thumbnailUrl: photo.thumbnailUrl,
       orderIndex: photo.orderIndex,
     })),
+  };
+}
+
+function toReferencePhotoDTO(photo: {
+  id: string;
+  whaleId: string;
+  url: string;
+  side: WhaleReferencePhotoDTO['side'];
+  quality: WhaleReferencePhotoDTO['quality'];
+  cropX: number | null;
+  cropY: number | null;
+  cropWidth: number | null;
+  cropHeight: number | null;
+  embeddingStatus: WhaleReferencePhotoDTO['embeddingStatus'];
+  notes: string | null;
+  createdAt: Date;
+  whale: { catalogId: string; name: string | null };
+}): WhaleReferencePhotoDTO {
+  return {
+    id: photo.id,
+    whaleId: photo.whaleId,
+    catalogId: photo.whale.catalogId,
+    whaleName: photo.whale.name,
+    url: photo.url,
+    side: photo.side,
+    quality: photo.quality,
+    cropX: photo.cropX,
+    cropY: photo.cropY,
+    cropWidth: photo.cropWidth,
+    cropHeight: photo.cropHeight,
+    embeddingStatus: photo.embeddingStatus,
+    notes: photo.notes,
+    createdAt: photo.createdAt.toISOString(),
   };
 }
 
@@ -370,4 +409,198 @@ export default async function adminRoutes(app: FastifyInstance) {
       return reply.code(201).send(toAnnotationDTO(annotation));
     },
   );
+
+  // ---- Identifier reference photos (MiewID V1) ---------------------------
+
+  const ReferencePhotoQuery = z.object({
+    side: ReferencePhotoSideEnum.default('UNKNOWN'),
+    quality: PhotoQualityEnum.default('USABLE'),
+    notes: z.string().max(500).optional(),
+    cropX: z.coerce.number().finite().nonnegative().optional(),
+    cropY: z.coerce.number().finite().nonnegative().optional(),
+    cropWidth: z.coerce.number().finite().positive().optional(),
+    cropHeight: z.coerce.number().finite().positive().optional(),
+  });
+
+  app.get(
+    '/reference-photos',
+    { preHandler: requireAdmin },
+    async (): Promise<WhaleReferencePhotoDTO[]> => {
+      const photos = await prisma.whaleReferencePhoto.findMany({
+        orderBy: { createdAt: 'desc' },
+        include: { whale: { select: { catalogId: true, name: true } } },
+        take: 500,
+      });
+      return photos.map(toReferencePhotoDTO);
+    },
+  );
+
+  app.post<{ Params: { catalogId: string } }>(
+    '/whales/:catalogId/reference-photos',
+    { preHandler: requireAdmin },
+    async (req, reply): Promise<WhaleReferencePhotoDTO | void> => {
+      const parsed = ReferencePhotoQuery.safeParse(req.query);
+      if (!parsed.success) return reply.code(400).send({ error: 'invalid query' });
+
+      const whale = await prisma.whale.findUnique({
+        where: { catalogId: req.params.catalogId },
+        select: { id: true, catalogId: true, name: true },
+      });
+      if (!whale) return reply.code(404).send({ error: 'Whale not found' });
+
+      const file = await req.file();
+      if (!file) return reply.code(400).send({ error: 'Multipart file required' });
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) {
+        return reply.code(415).send({ error: `Unsupported content type: ${file.mimetype}` });
+      }
+
+      const buffer = await file.toBuffer();
+      if (buffer.byteLength === 0) return reply.code(400).send({ error: 'Empty file' });
+
+      let referenceBuffer: Buffer;
+      try {
+        referenceBuffer = await sharp(buffer)
+          .rotate()
+          .resize({ width: 1200, withoutEnlargement: true })
+          .webp({ quality: 88 })
+          .toBuffer();
+      } catch (error) {
+        req.log.error({ error }, 'sharp failed to process reference photo');
+        return reply.code(400).send({ error: 'Photo could not be processed' });
+      }
+
+      const storage = getStorageBackend();
+      const filename = buildPhotoFilename(file.filename || `${whale.catalogId}.webp`, referenceBuffer)
+        .replace(/\.[^./]+$/, '.webp');
+      const stored = await storage.put({
+        prefix: `reference-photos/${whale.id}`,
+        filename,
+        contentType: 'image/webp',
+        body: referenceBuffer,
+      });
+
+      const photo = await prisma.whaleReferencePhoto.create({
+        data: {
+          whaleId: whale.id,
+          storageKey: stored.key,
+          url: stored.url,
+          side: parsed.data.side,
+          quality: parsed.data.quality,
+          cropX: parsed.data.cropX ?? null,
+          cropY: parsed.data.cropY ?? null,
+          cropWidth: parsed.data.cropWidth ?? null,
+          cropHeight: parsed.data.cropHeight ?? null,
+          notes: parsed.data.notes ?? null,
+          embeddingStatus: 'PENDING',
+        },
+        include: { whale: { select: { catalogId: true, name: true } } },
+      });
+
+      await prisma.auditLog.create({
+        data: {
+          userId: req.admin!.userId,
+          action: 'UPLOAD_REFERENCE_PHOTO',
+          entityType: 'whale_reference_photo',
+          entityId: photo.id,
+          metadata: {
+            catalogId: whale.catalogId,
+            side: parsed.data.side,
+            quality: parsed.data.quality,
+            storageKey: stored.key,
+          },
+        },
+      });
+
+      return reply.code(201).send(toReferencePhotoDTO(photo));
+    },
+  );
+
+  const RebuildResponse = z.object({
+    ok: z.boolean(),
+    indexVersion: z.string(),
+    embeddedReferencePhotoIds: z.array(z.string()),
+    failedReferencePhotoIds: z.array(z.string()).default([]),
+  });
+
+  app.post('/identifier/rebuild-index', { preHandler: requireAdmin }, async (req, reply) => {
+    const photos = await prisma.whaleReferencePhoto.findMany({
+      where: {
+        quality: { not: 'NOT_ORCA' },
+      },
+      include: { whale: { select: { catalogId: true, name: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (photos.length === 0) {
+      return reply.code(400).send({ error: 'No reference photos available to index' });
+    }
+
+    const serviceUrl = `${env.IDENTIFIER_SERVICE_URL.replace(/\/$/, '')}/rebuild-index`;
+    let response: globalThis.Response;
+    try {
+      response = await fetch(serviceUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          references: photos.map((photo) => ({
+            referencePhotoId: photo.id,
+            catalogId: photo.whale.catalogId,
+            name: photo.whale.name,
+            url: photo.url,
+            side: photo.side,
+            quality: photo.quality,
+            crop: photo.cropX === null
+              ? null
+              : {
+                  x: photo.cropX,
+                  y: photo.cropY,
+                  width: photo.cropWidth,
+                  height: photo.cropHeight,
+                },
+          })),
+        }),
+      });
+    } catch (error) {
+      req.log.error({ error, serviceUrl }, 'identifier service unavailable');
+      return reply.code(503).send({ error: 'Identifier service is not running' });
+    }
+
+    if (!response.ok) {
+      const text = await response.text();
+      req.log.error({ status: response.status, body: text.slice(0, 500) }, 'index rebuild failed');
+      return reply.code(502).send({ error: 'Identifier index rebuild failed' });
+    }
+
+    const parsed = RebuildResponse.safeParse(await response.json());
+    if (!parsed.success) {
+      return reply.code(502).send({ error: 'Identifier service returned an invalid response' });
+    }
+
+    if (parsed.data.embeddedReferencePhotoIds.length > 0) {
+      await prisma.whaleReferencePhoto.updateMany({
+        where: { id: { in: parsed.data.embeddedReferencePhotoIds } },
+        data: { embeddingStatus: 'EMBEDDED' },
+      });
+    }
+    if (parsed.data.failedReferencePhotoIds.length > 0) {
+      await prisma.whaleReferencePhoto.updateMany({
+        where: { id: { in: parsed.data.failedReferencePhotoIds } },
+        data: { embeddingStatus: 'FAILED' },
+      });
+    }
+
+    await prisma.auditLog.create({
+      data: {
+        userId: req.admin!.userId,
+        action: 'REBUILD_IDENTIFIER_INDEX',
+        entityType: 'identifier_index',
+        entityId: parsed.data.indexVersion,
+        metadata: {
+          embedded: parsed.data.embeddedReferencePhotoIds.length,
+          failed: parsed.data.failedReferencePhotoIds.length,
+        },
+      },
+    });
+
+    return parsed.data;
+  });
 }
