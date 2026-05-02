@@ -14,6 +14,7 @@ import authRoutes from './routes/auth.js';
 import externalSightingsRoutes from './routes/external-sightings.js';
 import healthRoutes from './routes/health.js';
 import identifyRoutes from './routes/identify.js';
+import predictRoutes from './routes/predict.js';
 import sightingPhotosRoutes from './routes/sighting-photos.js';
 import sightingsRoutes from './routes/sightings.js';
 import whalesRoutes from './routes/whales.js';
@@ -80,6 +81,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await app.register(sightingPhotosRoutes, { prefix: '/api/v1' });
   await app.register(externalSightingsRoutes, { prefix: '/api/v1' });
   await app.register(identifyRoutes, { prefix: '/api/v1' });
+  await app.register(predictRoutes, { prefix: '/api/v1' });
   await app.register(authRoutes, { prefix: '/api/v1/auth' });
   await app.register(adminRoutes, { prefix: '/api/v1/admin' });
 
