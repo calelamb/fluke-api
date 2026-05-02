@@ -246,3 +246,30 @@ export interface ExternalSightingDTO {
   notes: string | null;
   trusted: boolean;
 }
+
+// Atlas types (shared with iOS via M-iOS-8 + W-Atlas)
+
+export type Pod = 'J' | 'K' | 'L' | 'BIGGS';
+
+export interface HistoricalSighting {
+  id: string;
+  observedAt: string; // ISO 8601
+  latitude: number;
+  longitude: number;
+  locationName: string | null;
+  ecotypeGuess: 'RESIDENT' | 'BIGGS' | 'OFFSHORE' | 'UNKNOWN' | null;
+  whaleIds: string[];
+}
+
+export interface PredictionCell {
+  lat: number;
+  lng: number;
+  probability: number;
+}
+
+export interface Prediction {
+  cells: PredictionCell[];
+  confidence: number;
+  modelVersion: string;
+  computedAt: string;
+}
