@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { FastifyInstance } from 'fastify';
+import type { Prisma } from '@prisma/client';
 
 vi.mock('../db.js', () => ({
   prisma: {
@@ -12,10 +14,10 @@ const { prisma } = await import('../db.js');
 const { buildApp } = await import('../app.js');
 
 describe('GET /api/v1/predict', () => {
-  let app: ReturnType<typeof import('../app.js').buildApp>;
+  let app: FastifyInstance;
 
   beforeAll(async () => {
-    app = await import('../app.js').then((m) => m.buildApp({ silent: true }));
+    app = await buildApp({ silent: true });
     await app.ready();
   });
 
@@ -63,7 +65,7 @@ describe('GET /api/v1/predict', () => {
         { lat: 48.5, lng: -123.0, probability: 0.5 },
         { lat: 48.55, lng: -123.05, probability: 0.3 },
       ],
-      confidence: 0.8,
+      confidence: '0.8' as unknown as Prisma.Decimal,
       modelVersion: 'markov-v1',
       computedAt: new Date('2026-05-01T10:00:00Z'),
     };

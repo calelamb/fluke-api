@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeTransitions, predictNext, gridCell } from '../services/prediction-engine';
+import { computeTransitions, predictNext, gridCell } from '../services/prediction-engine.js';
 
 describe('prediction-engine', () => {
   it('gridCell maps lat/lng to a deterministic cell key', () => {
@@ -25,7 +25,7 @@ describe('prediction-engine', () => {
     const fromCell = gridCell(48.5, -123.0);
     expect(matrix[fromCell]).toBeDefined();
     const probs = Object.values(matrix[fromCell]);
-    const sum = probs.reduce((a, b) => a + b, 0);
+    const sum = probs.reduce((a: number, b: number) => a + b, 0);
     expect(sum).toBeCloseTo(1.0, 5);
   });
 
