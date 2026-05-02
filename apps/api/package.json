@@ -4,18 +4,19 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "db:create-admin": "tsx scripts/create-admin.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
-    "db:create-admin": "tsx scripts/create-admin.ts",
     "db:studio": "prisma studio",
-    "ingest:acartia": "tsx scripts/ingest-acartia.ts"
+    "dev": "tsx watch src/index.ts",
+    "ingest:acartia": "tsx scripts/ingest-acartia.ts",
+    "predict:compute": "tsx scripts/compute-predictions.ts",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@fastify/cookie": "^9.4.0",
