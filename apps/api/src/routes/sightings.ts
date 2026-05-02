@@ -124,6 +124,67 @@ const sightingsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.put('/sightings/:id', async (_request, reply) => reply.code(501).send(notImplemented));
   fastify.patch('/sightings/:id', async (_request, reply) => reply.code(501).send(notImplemented));
   fastify.delete('/sightings/:id', async (_request, reply) => reply.code(501).send(notImplemented));
+
+  fastify.get('/sightings/historical', async (request, reply) => {
+    const q = request.query as {
+      from?: string;
+      to?: string;
+      pod?: string;
+      whaleId?: string;
+    };
+
+    const where: any = { status: 'APPROVED' };
+    if (q.from || q.to) {
+      where.observedAt = {};
+      if (q.from) {
+        const d = new Date(q.from);
+        if (isNaN(d.getTime())) {
+          return reply.code(400).send({ error: 'Invalid from date' });
+        }
+        where.observedAt.gte = d;
+      }
+      if (q.to) {
+        const d = new Date(q.to);
+        if (isNaN(d.getTime())) {
+          return reply.code(400).send({ error: 'Invalid to date' });
+        }
+        where.observedAt.lte = d;
+      }
+    }
+
+    if (q.pod) {
+      where.whales = { some: { whale: { pod: q.pod } } };
+    }
+    if (q.whaleId) {
+      where.whales = { some: { whaleId: q.whaleId } };
+    }
+
+    const sightings = await prisma.sighting.findMany({
+      where,
+      orderBy: { observedAt: 'asc' },
+      select: {
+        id: true,
+        observedAt: true,
+        latitude: true,
+        longitude: true,
+        locationName: true,
+        ecotypeGuess: true,
+        whales: { select: { whaleId: true } },
+      },
+    });
+
+    reply.header('Cache-Control', 'public, max-age=900');
+
+    return sightings.map((s) => ({
+      id: s.id,
+      observedAt: s.observedAt.toISOString(),
+      latitude: Number(s.latitude),
+      longitude: Number(s.longitude),
+      locationName: s.locationName,
+      ecotypeGuess: s.ecotypeGuess,
+      whaleIds: s.whales.map((w) => w.whaleId),
+    }));
+  });
 };
 
 export default sightingsRoutes;
