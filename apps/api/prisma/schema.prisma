@@ -253,3 +253,17 @@ model ExternalSighting {
   @@index([latitude, longitude])
   @@map("external_sightings")
 }
+
+model PredictionGrid {
+  id            String   @id @default(uuid())
+  subjectKind   String   @map("subject_kind")
+  subjectId     String   @map("subject_id")
+  horizonHours  Int      @map("horizon_hours")
+  cells         Json
+  confidence    Decimal  @db.Decimal(4, 3)
+  modelVersion  String   @map("model_version")
+  computedAt    DateTime @map("computed_at")
+
+  @@unique([subjectKind, subjectId, horizonHours])
+  @@map("prediction_grids")
+}
