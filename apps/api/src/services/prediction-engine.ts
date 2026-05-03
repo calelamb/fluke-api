@@ -72,8 +72,26 @@ export function predictNext(args: {
   topN: number;
 }): PredictionEntry[] {
   const row = args.matrix[args.currentCell] ?? {};
-  return Object.entries(row)
+  const direct = Object.entries(row)
     .map(([cell, p]) => ({ cell, probability: p }))
+    .sort((a, b) => b.probability - a.probability)
+    .slice(0, args.topN);
+
+  if (direct.length > 0) return direct;
+
+  // Fallback: when the current cell has no recorded transitions, surface
+  // the most-visited destination cells across the entire transition matrix.
+  // This gives a reasonable "where this group typically goes" prior even
+  // when the immediate Markov chain is sparse.
+  const aggregate = new Map<string, number>();
+  for (const destinations of Object.values(args.matrix)) {
+    for (const [cell, p] of Object.entries(destinations)) {
+      aggregate.set(cell, (aggregate.get(cell) ?? 0) + p);
+    }
+  }
+  const total = Array.from(aggregate.values()).reduce((a, b) => a + b, 0) || 1;
+  return Array.from(aggregate.entries())
+    .map(([cell, p]) => ({ cell, probability: p / total }))
     .sort((a, b) => b.probability - a.probability)
     .slice(0, args.topN);
 }
