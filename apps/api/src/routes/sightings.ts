@@ -134,14 +134,18 @@ const sightingsRoutes: FastifyPluginAsync = async (fastify) => {
     };
 
     const where: any = { status: 'APPROVED' };
+    const externalWhere: any = {};
+
     if (q.from || q.to) {
       where.observedAt = {};
+      externalWhere.observedAt = {};
       if (q.from) {
         const d = new Date(q.from);
         if (isNaN(d.getTime())) {
           return reply.code(400).send({ error: 'Invalid from date' });
         }
         where.observedAt.gte = d;
+        externalWhere.observedAt.gte = d;
       }
       if (q.to) {
         const d = new Date(q.to);
@@ -149,6 +153,7 @@ const sightingsRoutes: FastifyPluginAsync = async (fastify) => {
           return reply.code(400).send({ error: 'Invalid to date' });
         }
         where.observedAt.lte = d;
+        externalWhere.observedAt.lte = d;
       }
     }
 
@@ -159,7 +164,7 @@ const sightingsRoutes: FastifyPluginAsync = async (fastify) => {
       where.whales = { some: { whaleId: q.whaleId } };
     }
 
-    const sightings = await prisma.sighting.findMany({
+    const userSightings = await prisma.sighting.findMany({
       where,
       orderBy: { observedAt: 'asc' },
       select: {
@@ -173,9 +178,37 @@ const sightingsRoutes: FastifyPluginAsync = async (fastify) => {
       },
     });
 
+    // External sightings (Acartia, GBIF, etc.) are filtered by ecotype when a
+    // pod is requested (resident pods → RESIDENT ecotype; Bigg's → BIGGS).
+    // They have no whale-link join, so whaleId queries skip them entirely.
+    let externalSightings: Array<{
+      id: string;
+      observedAt: Date;
+      latitude: any;
+      longitude: any;
+      ecotypeGuess: string | null;
+    }> = [];
+
+    if (!q.whaleId) {
+      if (q.pod === 'BIGGS') externalWhere.ecotypeGuess = 'BIGGS';
+      else if (q.pod === 'J' || q.pod === 'K' || q.pod === 'L') externalWhere.ecotypeGuess = 'RESIDENT';
+
+      externalSightings = await prisma.externalSighting.findMany({
+        where: externalWhere,
+        orderBy: { observedAt: 'asc' },
+        select: {
+          id: true,
+          observedAt: true,
+          latitude: true,
+          longitude: true,
+          ecotypeGuess: true,
+        },
+      });
+    }
+
     reply.header('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
 
-    return sightings.map((s) => ({
+    const userMapped = userSightings.map((s) => ({
       id: s.id,
       observedAt: s.observedAt.toISOString(),
       latitude: Number(s.latitude),
@@ -184,6 +217,20 @@ const sightingsRoutes: FastifyPluginAsync = async (fastify) => {
       ecotypeGuess: s.ecotypeGuess,
       whaleIds: s.whales.map((w) => w.whaleId),
     }));
+
+    const externalMapped = externalSightings.map((s) => ({
+      id: `ext:${s.id}`,
+      observedAt: s.observedAt.toISOString(),
+      latitude: Number(s.latitude),
+      longitude: Number(s.longitude),
+      locationName: null,
+      ecotypeGuess: s.ecotypeGuess,
+      whaleIds: [] as string[],
+    }));
+
+    const merged = [...userMapped, ...externalMapped];
+    merged.sort((a, b) => a.observedAt.localeCompare(b.observedAt));
+    return merged;
   });
 };
 

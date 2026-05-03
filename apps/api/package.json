@@ -13,6 +13,7 @@
     "db:studio": "prisma studio",
     "dev": "tsx watch src/index.ts",
     "ingest:acartia": "tsx scripts/ingest-acartia.ts",
+    "ingest:gbif": "tsx scripts/ingest-gbif.ts",
     "predict:compute": "tsx scripts/compute-predictions.ts",
     "start": "node dist/index.js",
     "test": "vitest run",

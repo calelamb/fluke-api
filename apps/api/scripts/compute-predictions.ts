@@ -85,7 +85,7 @@ async function main() {
       pod === 'BIGGS'
         ? { ecotype: 'BIGGS' }
         : { pod };
-    const sightings = await prisma.sighting.findMany({
+    const userSightings = await prisma.sighting.findMany({
       where: {
         status: 'APPROVED',
         whales: {
@@ -97,12 +97,31 @@ async function main() {
       orderBy: { observedAt: 'asc' },
       select: { observedAt: true, latitude: true, longitude: true },
     });
-    const sightingsConverted = sightings.map((s) => ({
-      observedAt: s.observedAt,
-      latitude: Number(s.latitude),
-      longitude: Number(s.longitude),
-    }));
+
+    // Augment with external sightings filtered by ecotype. J/K/L all map
+    // to RESIDENT in the public datasets; BIGGS maps to BIGGS.
+    const externalEcotype = pod === 'BIGGS' ? 'BIGGS' : 'RESIDENT';
+    const externalSightings = await prisma.externalSighting.findMany({
+      where: { ecotypeGuess: externalEcotype },
+      orderBy: { observedAt: 'asc' },
+      select: { observedAt: true, latitude: true, longitude: true },
+    });
+
+    const sightingsConverted = [
+      ...userSightings.map((s) => ({
+        observedAt: s.observedAt,
+        latitude: Number(s.latitude),
+        longitude: Number(s.longitude),
+      })),
+      ...externalSightings.map((s) => ({
+        observedAt: s.observedAt,
+        latitude: Number(s.latitude),
+        longitude: Number(s.longitude),
+      })),
+    ].sort((a, b) => a.observedAt.getTime() - b.observedAt.getTime());
+
     if (sightingsConverted.length === 0) continue;
+    console.log(`  [${pod}] ${userSightings.length} user + ${externalSightings.length} external = ${sightingsConverted.length} total sightings`);
 
     const targetMonth = new Date().getUTCMonth() + 1;
     const matrix = computeTransitions(sightingsConverted, targetMonth);
