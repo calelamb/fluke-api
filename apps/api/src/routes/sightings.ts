@@ -173,7 +173,7 @@ const sightingsRoutes: FastifyPluginAsync = async (fastify) => {
       },
     });
 
-    reply.header('Cache-Control', 'public, max-age=900');
+    reply.header('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
 
     return sightings.map((s) => ({
       id: s.id,

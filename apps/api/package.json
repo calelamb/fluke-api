@@ -9,6 +9,7 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed-history": "tsx scripts/seed-historical-sightings.ts",
     "db:studio": "prisma studio",
     "dev": "tsx watch src/index.ts",
     "ingest:acartia": "tsx scripts/ingest-acartia.ts",
