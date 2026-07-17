@@ -1,9 +1,12 @@
 import { z, type ZodType } from 'zod';
 import {
+  CapabilitiesSchema,
   ExternalSightingSchema,
   HistoricalSightingSchema,
   IdentifyResponseSchema,
   PredictionSchema,
+  RELEASE_A_CAPABILITIES,
+  SafeErrorSchema,
   SightingSchema,
   WhaleProfileSchema,
   WhaleSchema,
@@ -23,44 +26,31 @@ const HealthSchema = z.object({
   timestamp: z.string().datetime(),
 });
 
-const CapabilitiesSchema = z.object({
-  accounts: z.boolean(),
-  identification: z.boolean(),
-  submissions: z.boolean(),
-});
-
-const SafeErrorSchema = z.object({
-  code: z.string().min(1),
-  message: z.string().min(1),
-  requestId: z.string().min(1),
-  retryable: z.boolean(),
-});
-
 const whaleFixture = {
-  biography: 'A well-documented member of J pod.',
-  birthYear: 1998,
-  catalogId: 'J35',
+  biography: 'Synthetic biography for contract testing only.',
+  birthYear: 2000,
+  catalogId: 'FX-001',
   deathYear: null,
-  distinguishingMarks: 'Distinctive dorsal fin and saddle patch.',
-  ecotype: 'RESIDENT',
-  heroImageUrl: 'https://fixtures.fluke.test/whales/j35.jpg',
-  id: 'whale-j35',
-  name: 'Tahlequah',
+  distinguishingMarks: 'Synthetic distinguishing marks.',
+  ecotype: 'UNKNOWN',
+  heroImageUrl: 'https://fixtures.invalid/whales/fixture-alpha.jpg',
+  id: 'fixture-whale-alpha',
+  name: 'Fixture Whale Alpha',
   notableEvents: [
     {
-      date: '2020-09-05',
-      source: 'Center for Whale Research',
-      summary: 'Observed traveling with a healthy calf.',
-      type: 'birth',
-      year: 2020,
+      date: '2024-01-15',
+      source: 'Synthetic Fixture Source',
+      summary: 'Synthetic milestone for contract testing.',
+      type: 'milestone',
+      year: 2024,
     },
   ],
-  pod: 'J',
+  pod: 'FIXTURE_POD',
   sex: 'FEMALE',
   sourceCitations: [
     {
-      label: 'Orca Survey',
-      url: 'https://fixtures.fluke.test/sources/orca-survey',
+      label: 'Synthetic Fixture Citation',
+      url: 'https://fixtures.invalid/sources/synthetic',
     },
   ],
   status: 'ALIVE',
@@ -69,73 +59,71 @@ const whaleFixture = {
 const whaleDetailFixture = {
   ...whaleFixture,
   mother: {
-    catalogId: 'J17',
-    name: 'Princess Angeline',
+    catalogId: 'FX-000',
+    name: 'Fixture Whale Parent',
   },
   offspring: [
     {
-      catalogId: 'J57',
-      name: 'Phoenix',
+      catalogId: 'FX-002',
+      name: 'Fixture Whale Offspring',
     },
   ],
   recentSightings: [
     {
-      id: 'sighting-salish-sea',
-      latitude: 48.516,
-      locationName: 'Salish Sea',
-      longitude: -123.152,
+      id: 'fixture-sighting-1',
+      latitude: 12.345,
+      locationName: 'Fixture Strait',
+      longitude: -45.678,
       observedAt: FIXTURE_TIMESTAMP,
     },
   ],
 } as const;
 
 const sightingFixture = {
-  behaviorNotes: 'Traveling north in a close group.',
-  ecotypeGuess: 'RESIDENT',
+  behaviorNotes: 'Synthetic travel notes for contract testing.',
+  ecotypeGuess: 'UNKNOWN',
   groupSize: 4,
-  id: 'sighting-salish-sea',
+  id: 'fixture-sighting-1',
   identifiedWhales: [
     {
-      catalogId: 'J35',
+      catalogId: 'FX-001',
       confidence: 'CONFIRMED',
-      name: 'Tahlequah',
+      name: 'Fixture Whale Alpha',
     },
   ],
-  latitude: 48.516,
-  locationName: 'Salish Sea',
-  longitude: -123.152,
+  latitude: 12.345,
+  locationName: 'Fixture Strait',
+  longitude: -45.678,
   observedAt: FIXTURE_TIMESTAMP,
   photos: [
     {
-      id: 'photo-salish-sea-1',
+      id: 'fixture-photo-1',
       orderIndex: 0,
-      thumbnailUrl: 'https://fixtures.fluke.test/sightings/salish-sea-thumb.jpg',
-      url: 'https://fixtures.fluke.test/sightings/salish-sea.jpg',
+      thumbnailUrl: 'https://fixtures.invalid/sightings/fixture-thumb.jpg',
+      url: 'https://fixtures.invalid/sightings/fixture.jpg',
     },
   ],
-  photoUrls: ['https://fixtures.fluke.test/sightings/salish-sea.jpg'],
+  photoUrls: ['https://fixtures.invalid/sightings/fixture.jpg'],
   status: 'APPROVED',
 } as const;
 
 const fixtures = {
   capabilities: {
-    accounts: false,
-    identification: false,
-    submissions: false,
+    ...RELEASE_A_CAPABILITIES,
   },
   'external-sightings': [
     {
-      attribution: 'Fixture research feed',
-      ecotypeGuess: 'BIGGS',
+      attribution: 'Synthetic fixture feed',
+      ecotypeGuess: 'UNKNOWN',
       externalId: 'fixture-observation-1',
       groupSize: 3,
       id: 'external-sighting-1',
-      latitude: 48.62,
-      longitude: -123.31,
-      notes: 'Public research observation.',
+      latitude: 23.456,
+      longitude: -56.789,
+      notes: 'Synthetic observation for contract testing.',
       observedAt: FIXTURE_TIMESTAMP,
       source: 'fixture-feed',
-      sourceUrl: 'https://fixtures.fluke.test/observations/1',
+      sourceUrl: 'https://fixtures.invalid/observations/1',
       species: 'Orcinus orca',
       trusted: true,
     },
@@ -146,13 +134,13 @@ const fixtures = {
   },
   'historical-sightings': [
     {
-      ecotypeGuess: 'RESIDENT',
+      ecotypeGuess: 'UNKNOWN',
       id: 'historical-sighting-1',
-      latitude: 48.516,
-      locationName: 'Salish Sea',
-      longitude: -123.152,
+      latitude: 12.345,
+      locationName: 'Fixture Strait',
+      longitude: -45.678,
       observedAt: '2025-07-16T18:00:00.000Z',
-      whaleIds: ['whale-j35'],
+      whaleIds: ['fixture-whale-alpha'],
     },
   ],
   identify: {
@@ -160,22 +148,22 @@ const fixtures = {
     indexVersion: 'fixture-index-v1',
     matches: [
       {
-        catalogId: 'J35',
-        explanation: 'Dorsal fin and saddle patch features are consistent.',
-        matchedReferencePhotoIds: ['reference-j35-left'],
-        name: 'Tahlequah',
+        catalogId: 'FX-001',
+        explanation: 'Synthetic image features match the fixture reference.',
+        matchedReferencePhotoIds: ['fixture-reference-alpha'],
+        name: 'Fixture Whale Alpha',
         rank: 1,
         score: 0.94,
       },
     ],
     model: 'fixture-identifier-v1',
-    uploadUrl: 'https://fixtures.fluke.test/identify/upload-1.jpg',
+    uploadUrl: 'https://fixtures.invalid/identify/upload-1.jpg',
   },
   prediction: {
     cells: [
       {
-        lat: 48.5,
-        lng: -123.2,
+        lat: 34.567,
+        lng: -67.89,
         probability: 0.72,
       },
     ],
@@ -184,10 +172,7 @@ const fixtures = {
     modelVersion: 'fixture-prediction-v1',
   },
   'safe-error': {
-    code: 'WHALE_NOT_FOUND',
-    message: 'Whale not found.',
-    requestId: 'request-contract-fixture',
-    retryable: false,
+    error: 'Requested fixture resource was not found.',
   },
   sightings: [sightingFixture],
   'whale-detail': whaleDetailFixture,

@@ -1,29 +1,29 @@
 [
   {
-    "biography": "A well-documented member of J pod.",
-    "birthYear": 1998,
-    "catalogId": "J35",
+    "biography": "Synthetic biography for contract testing only.",
+    "birthYear": 2000,
+    "catalogId": "FX-001",
     "deathYear": null,
-    "distinguishingMarks": "Distinctive dorsal fin and saddle patch.",
-    "ecotype": "RESIDENT",
-    "heroImageUrl": "https://fixtures.fluke.test/whales/j35.jpg",
-    "id": "whale-j35",
-    "name": "Tahlequah",
+    "distinguishingMarks": "Synthetic distinguishing marks.",
+    "ecotype": "UNKNOWN",
+    "heroImageUrl": "https://fixtures.invalid/whales/fixture-alpha.jpg",
+    "id": "fixture-whale-alpha",
+    "name": "Fixture Whale Alpha",
     "notableEvents": [
       {
-        "date": "2020-09-05",
-        "source": "Center for Whale Research",
-        "summary": "Observed traveling with a healthy calf.",
-        "type": "birth",
-        "year": 2020
+        "date": "2024-01-15",
+        "source": "Synthetic Fixture Source",
+        "summary": "Synthetic milestone for contract testing.",
+        "type": "milestone",
+        "year": 2024
       }
     ],
-    "pod": "J",
+    "pod": "FIXTURE_POD",
     "sex": "FEMALE",
     "sourceCitations": [
       {
-        "label": "Orca Survey",
-        "url": "https://fixtures.fluke.test/sources/orca-survey"
+        "label": "Synthetic Fixture Citation",
+        "url": "https://fixtures.invalid/sources/synthetic"
       }
     ],
     "status": "ALIVE"

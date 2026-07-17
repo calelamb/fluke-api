@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { listFiles } from './contract-io.js';
+import { compareCodePoints, listFiles } from './contract-io.js';
 import { generateContracts } from './generate-contracts.js';
 
 export type ContractDriftKind = 'changed' | 'missing' | 'unexpected';
@@ -30,9 +30,7 @@ export async function compareContractTrees(
   ]);
   const expected = new Set(expectedFiles);
   const actual = new Set(actualFiles);
-  const allPaths = [...new Set([...expectedFiles, ...actualFiles])].sort((left, right) =>
-    left.localeCompare(right),
-  );
+  const allPaths = [...new Set([...expectedFiles, ...actualFiles])].sort(compareCodePoints);
 
   const drift = await Promise.all(
     allPaths.map(async (path): Promise<ContractDrift | null> => {

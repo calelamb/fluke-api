@@ -3,16 +3,16 @@
   "indexVersion": "fixture-index-v1",
   "matches": [
     {
-      "catalogId": "J35",
-      "explanation": "Dorsal fin and saddle patch features are consistent.",
+      "catalogId": "FX-001",
+      "explanation": "Synthetic image features match the fixture reference.",
       "matchedReferencePhotoIds": [
-        "reference-j35-left"
+        "fixture-reference-alpha"
       ],
-      "name": "Tahlequah",
+      "name": "Fixture Whale Alpha",
       "rank": 1,
       "score": 0.94
     }
   ],
   "model": "fixture-identifier-v1",
-  "uploadUrl": "https://fixtures.fluke.test/identify/upload-1.jpg"
+  "uploadUrl": "https://fixtures.invalid/identify/upload-1.jpg"
 }

@@ -1,16 +1,16 @@
 [
   {
-    "attribution": "Fixture research feed",
-    "ecotypeGuess": "BIGGS",
+    "attribution": "Synthetic fixture feed",
+    "ecotypeGuess": "UNKNOWN",
     "externalId": "fixture-observation-1",
     "groupSize": 3,
     "id": "external-sighting-1",
-    "latitude": 48.62,
-    "longitude": -123.31,
-    "notes": "Public research observation.",
+    "latitude": 23.456,
+    "longitude": -56.789,
+    "notes": "Synthetic observation for contract testing.",
     "observedAt": "2026-07-16T18:00:00.000Z",
     "source": "fixture-feed",
-    "sourceUrl": "https://fixtures.fluke.test/observations/1",
+    "sourceUrl": "https://fixtures.invalid/observations/1",
     "species": "Orcinus orca",
     "trusted": true
   }

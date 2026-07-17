@@ -87,6 +87,12 @@
           "observedAt": {
             "type": "string"
           },
+          "photoUrls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "photos": {
             "items": {
               "additionalProperties": false,
@@ -111,12 +117,6 @@
                 "orderIndex"
               ],
               "type": "object"
-            },
-            "type": "array"
-          },
-          "photoUrls": {
-            "items": {
-              "type": "string"
             },
             "type": "array"
           },

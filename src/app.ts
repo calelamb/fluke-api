@@ -11,6 +11,7 @@ import { env, isProduction } from './env.js';
 import { resolveUploadsDir } from './lib/storage.js';
 import adminRoutes from './routes/admin.js';
 import authRoutes from './routes/auth.js';
+import capabilitiesRoutes from './routes/capabilities.js';
 import externalSightingsRoutes from './routes/external-sightings.js';
 import healthRoutes from './routes/health.js';
 import identifyRoutes from './routes/identify.js';
@@ -76,6 +77,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   }
 
   await app.register(healthRoutes, { prefix: '/api/v1' });
+  await app.register(capabilitiesRoutes, { prefix: '/api/v1' });
   await app.register(whalesRoutes, { prefix: '/api/v1' });
   await app.register(sightingsRoutes, { prefix: '/api/v1' });
   await app.register(sightingPhotosRoutes, { prefix: '/api/v1' });

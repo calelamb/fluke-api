@@ -5,27 +5,13 @@
     "SafeError": {
       "additionalProperties": false,
       "properties": {
-        "code": {
+        "error": {
           "minLength": 1,
           "type": "string"
-        },
-        "message": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "requestId": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "retryable": {
-          "type": "boolean"
         }
       },
       "required": [
-        "code",
-        "message",
-        "requestId",
-        "retryable"
+        "error"
       ],
       "type": "object"
     }

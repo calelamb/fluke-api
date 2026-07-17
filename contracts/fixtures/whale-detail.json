@@ -1,47 +1,47 @@
 {
-  "biography": "A well-documented member of J pod.",
-  "birthYear": 1998,
-  "catalogId": "J35",
+  "biography": "Synthetic biography for contract testing only.",
+  "birthYear": 2000,
+  "catalogId": "FX-001",
   "deathYear": null,
-  "distinguishingMarks": "Distinctive dorsal fin and saddle patch.",
-  "ecotype": "RESIDENT",
-  "heroImageUrl": "https://fixtures.fluke.test/whales/j35.jpg",
-  "id": "whale-j35",
+  "distinguishingMarks": "Synthetic distinguishing marks.",
+  "ecotype": "UNKNOWN",
+  "heroImageUrl": "https://fixtures.invalid/whales/fixture-alpha.jpg",
+  "id": "fixture-whale-alpha",
   "mother": {
-    "catalogId": "J17",
-    "name": "Princess Angeline"
+    "catalogId": "FX-000",
+    "name": "Fixture Whale Parent"
   },
-  "name": "Tahlequah",
+  "name": "Fixture Whale Alpha",
   "notableEvents": [
     {
-      "date": "2020-09-05",
-      "source": "Center for Whale Research",
-      "summary": "Observed traveling with a healthy calf.",
-      "type": "birth",
-      "year": 2020
+      "date": "2024-01-15",
+      "source": "Synthetic Fixture Source",
+      "summary": "Synthetic milestone for contract testing.",
+      "type": "milestone",
+      "year": 2024
     }
   ],
   "offspring": [
     {
-      "catalogId": "J57",
-      "name": "Phoenix"
+      "catalogId": "FX-002",
+      "name": "Fixture Whale Offspring"
     }
   ],
-  "pod": "J",
+  "pod": "FIXTURE_POD",
   "recentSightings": [
     {
-      "id": "sighting-salish-sea",
-      "latitude": 48.516,
-      "locationName": "Salish Sea",
-      "longitude": -123.152,
+      "id": "fixture-sighting-1",
+      "latitude": 12.345,
+      "locationName": "Fixture Strait",
+      "longitude": -45.678,
       "observedAt": "2026-07-16T18:00:00.000Z"
     }
   ],
   "sex": "FEMALE",
   "sourceCitations": [
     {
-      "label": "Orca Survey",
-      "url": "https://fixtures.fluke.test/sources/orca-survey"
+      "label": "Synthetic Fixture Citation",
+      "url": "https://fixtures.invalid/sources/synthetic"
     }
   ],
   "status": "ALIVE"

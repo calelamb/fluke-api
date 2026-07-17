@@ -1,10 +1,14 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { findContractDrift } from '../../scripts/check-contracts.js';
 import { contractDefinitions } from '../../scripts/contract-definitions.js';
-import { formatJson, listFiles } from '../../scripts/contract-io.js';
+import {
+  compareCodePoints,
+  formatJson,
+  listFiles,
+} from '../../scripts/contract-io.js';
 import { generateContracts } from '../../scripts/generate-contracts.js';
 
 const expectedFiles = contractDefinitions
@@ -12,7 +16,7 @@ const expectedFiles = contractDefinitions
     `fixtures/${name}.json`,
     `schemas/${name}.schema.json`,
   ])
-  .sort((left, right) => left.localeCompare(right));
+  .sort(compareCodePoints);
 
 async function withTemporaryDirectory<T>(
   prefix: string,
@@ -75,6 +79,20 @@ describe('contract generation', () => {
           expect(schemaText).toBe(formatJson(jsonSchema));
         }),
       );
+
+      const fixtureCorpus = (
+        await Promise.all(
+          contractDefinitions.map(({ name }) =>
+            readFile(join(root, 'fixtures', `${name}.json`), 'utf8'),
+          ),
+        )
+      ).join('\n');
+      expect(fixtureCorpus).not.toMatch(/J35|J17|J57|Tahlequah|Princess Angeline|Phoenix/);
+
+      const safeError = JSON.parse(
+        await readFile(join(root, 'fixtures', 'safe-error.json'), 'utf8'),
+      ) as unknown;
+      expect(safeError).toEqual({ error: 'Requested fixture resource was not found.' });
     });
   });
 
@@ -91,6 +109,34 @@ describe('contract generation', () => {
         { kind: 'missing', path: 'fixtures/health.json' },
         { kind: 'unexpected', path: 'fixtures/unexpected.json' },
         { kind: 'changed', path: 'fixtures/whales.json' },
+      ]);
+    });
+  });
+
+  it('reports every artifact missing when the checked-in root does not exist', async () => {
+    await withTemporaryDirectory('fluke-contracts-absent-', async (parent) => {
+      const absentRoot = join(parent, 'contracts');
+
+      const drift = await findContractDrift(absentRoot);
+
+      expect(drift).toHaveLength(expectedFiles.length);
+      expect(drift).toEqual(
+        expectedFiles.map((path) => ({ kind: 'missing', path })),
+      );
+    });
+  });
+
+  it('uses code-point ordering for file paths', async () => {
+    await withTemporaryDirectory('fluke-contracts-order-', async (root) => {
+      await mkdir(join(root, 'fixtures'));
+      await Promise.all([
+        writeFile(join(root, 'fixtures', 'a.json'), '{}\n', 'utf8'),
+        writeFile(join(root, 'fixtures', 'Z.json'), '{}\n', 'utf8'),
+      ]);
+
+      await expect(listFiles(root)).resolves.toEqual([
+        'fixtures/Z.json',
+        'fixtures/a.json',
       ]);
     });
   });

@@ -1,30 +1,30 @@
 [
   {
-    "behaviorNotes": "Traveling north in a close group.",
-    "ecotypeGuess": "RESIDENT",
+    "behaviorNotes": "Synthetic travel notes for contract testing.",
+    "ecotypeGuess": "UNKNOWN",
     "groupSize": 4,
-    "id": "sighting-salish-sea",
+    "id": "fixture-sighting-1",
     "identifiedWhales": [
       {
-        "catalogId": "J35",
+        "catalogId": "FX-001",
         "confidence": "CONFIRMED",
-        "name": "Tahlequah"
+        "name": "Fixture Whale Alpha"
       }
     ],
-    "latitude": 48.516,
-    "locationName": "Salish Sea",
-    "longitude": -123.152,
+    "latitude": 12.345,
+    "locationName": "Fixture Strait",
+    "longitude": -45.678,
     "observedAt": "2026-07-16T18:00:00.000Z",
+    "photoUrls": [
+      "https://fixtures.invalid/sightings/fixture.jpg"
+    ],
     "photos": [
       {
-        "id": "photo-salish-sea-1",
+        "id": "fixture-photo-1",
         "orderIndex": 0,
-        "thumbnailUrl": "https://fixtures.fluke.test/sightings/salish-sea-thumb.jpg",
-        "url": "https://fixtures.fluke.test/sightings/salish-sea.jpg"
+        "thumbnailUrl": "https://fixtures.invalid/sightings/fixture-thumb.jpg",
+        "url": "https://fixtures.invalid/sightings/fixture.jpg"
       }
-    ],
-    "photoUrls": [
-      "https://fixtures.fluke.test/sightings/salish-sea.jpg"
     ],
     "status": "APPROVED"
   }
