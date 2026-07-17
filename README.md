@@ -68,7 +68,7 @@ All environment input is validated at startup. The process exits with field-spec
 | `API_PUBLIC_ORIGIN` | No | Public API origin used to create absolute photo URLs. |
 | `IDENTIFIER_SERVICE_URL` | No | Base URL for the separate identifier service. |
 | `STORAGE_BACKEND` | No | `local` or `r2`; defaults to `local`. |
-| `UPLOADS_DIR` | No | Local upload directory; defaults to `uploads`. |
+| `UPLOADS_DIR` | No | Local upload directory; defaults to `uploads` in source. The container sets `/app/uploads`. |
 | `R2_BUCKET` | For R2 | R2 bucket name. |
 | `R2_ENDPOINT` | For R2 | R2 S3-compatible endpoint. |
 | `R2_ACCESS_KEY_ID` | For R2 | R2 access key ID. |
@@ -102,9 +102,16 @@ The multi-stage image pins Node and pnpm, prunes development dependencies, and r
 
 ```bash
 docker build --tag fluke-api:local .
-docker run --rm --publish 4000:4000 --env-file .env fluke-api:local
+docker run --rm --publish 4000:4000 \
+  --env-file .env \
+  --env NODE_ENV=production \
+  --env UPLOADS_DIR=/app/uploads \
+  --volume fluke-api-uploads:/app/uploads \
+  fluke-api:local
 curl --fail http://localhost:4000/api/v1/ready
 ```
+
+The runtime image already sets `NODE_ENV=production` and `UPLOADS_DIR=/app/uploads`; the explicit flags above document the effective values and the volume's writable mount point. CI overrides its test-process environment with `NODE_ENV=production` when it smokes the pruned runtime image.
 
 Database migrations are intentionally not part of the image startup command. Apply them as a separate, observable release step before starting the new application image:
 
@@ -126,7 +133,7 @@ A Railway deployment marked successful is not sufficient on its own: the public 
 
 ## CI release gates
 
-GitHub Actions installs the pinned toolchain, starts PostgreSQL, applies migrations, checks standalone layout and contract drift, type-checks, lints, enforces coverage, builds, audits production dependencies, and scans full Git history with Gitleaks. It then builds the non-root container and verifies readiness against the migrated PostgreSQL service.
+GitHub Actions installs the pinned toolchain, starts PostgreSQL, applies migrations, checks standalone layout and contract drift, type-checks, lints, enforces coverage, builds, audits production dependencies, and installs Gitleaks `8.30.1`. The action's event scan runs without PR comments under read-only permissions, followed by an explicit `--all` full-history scan. CI then builds the non-root container and verifies it in production mode against the migrated PostgreSQL service.
 
 Run the locally available equivalents before pushing:
 
@@ -138,7 +145,7 @@ pnpm lint
 pnpm test:coverage
 pnpm build
 pnpm audit
-gitleaks git --redact --no-banner .
+gitleaks git --log-opts=--all --redact --no-banner .
 git diff --check
 git fsck --full --strict
 ```
