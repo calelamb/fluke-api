@@ -20,10 +20,13 @@ import {
 import { boundedDatabaseRead } from './lib/bounded-database-read.js';
 import { assertRequiredMigration } from './ops/migration-readiness.js';
 import { resolveUploadsDir } from './lib/storage.js';
+import type { StorageBackend } from './lib/storage.js';
+import type { TokenCrypto } from './lib/token-crypto.js';
 import { resolveRequestId } from './lib/request-id.js';
 import { classifyError, classifyStatus } from './lib/safe-errors.js';
 import adminRoutes from './routes/admin.js';
 import authRoutes from './routes/auth.js';
+import observerAuthRoutes from './routes/observer-auth.js';
 import capabilitiesRoutes from './routes/capabilities.js';
 import externalSightingsRoutes from './routes/external-sightings.js';
 import healthRoutes, { type ReadinessProbe } from './routes/health.js';
@@ -34,12 +37,23 @@ import sightingPhotosRoutes from './routes/sighting-photos.js';
 import sightingSubmissionRoutes from './routes/sighting-submissions.js';
 import sightingsRoutes from './routes/sightings.js';
 import whalesRoutes from './routes/whales.js';
+import type { AppleAuthService } from './services/apple-auth.js';
+
+export interface ObserverAuthDependencies {
+  readonly appleAuth: Pick<
+    AppleAuthService,
+    'exchangeAppleAuthorizationCode' | 'revokeAppleRefreshToken' | 'verifyAppleIdentityToken'
+  >;
+  readonly storage: StorageBackend;
+  readonly tokenCrypto: Pick<TokenCrypto, 'decryptToken' | 'encryptToken'>;
+}
 
 export interface BuildAppOptions {
   readonly features?: FeatureConfig;
   readonly publicReadRateLimitMax?: number;
   readonly publicReadTimeoutMs?: number;
   readonly readinessProbe?: ReadinessProbe;
+  readonly observerAuth?: ObserverAuthDependencies;
   readonly silent?: boolean;
   readonly trustProxy?: false | 1;
 }
@@ -105,6 +119,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       'publicReadTimeoutMs',
     ),
     readinessProbe: options.readinessProbe ?? defaultReadinessProbe,
+    observerAuth: options.observerAuth,
     silent: options.silent ?? false,
     // Production is bound to exactly one trusted reverse-proxy hop. Never
     // trust an arbitrary X-Forwarded-For chain.
@@ -293,7 +308,16 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     await app.register(identifyRoutes, { prefix: '/api/v1' });
   }
   if (resolvedOptions.features.accounts) {
-    await app.register(authRoutes, { prefix: '/api/v1/auth' });
+    await app.register(authRoutes, {
+      includeSessionRoutes: resolvedOptions.observerAuth === undefined,
+      prefix: '/api/v1/auth',
+    });
+    if (resolvedOptions.observerAuth !== undefined) {
+      await app.register(observerAuthRoutes, {
+        ...resolvedOptions.observerAuth,
+        prefix: '/api/v1/auth',
+      });
+    }
     await app.register(adminRoutes, { prefix: '/api/v1/admin' });
   }
 

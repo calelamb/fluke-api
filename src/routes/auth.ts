@@ -19,12 +19,16 @@ const LoginBody = z.object({
 const ADMIN_LOGIN_LIMIT_MAX = 5;
 const ADMIN_LOGIN_WINDOW = '15 minutes';
 
+export interface AuthRouteOptions {
+  readonly includeSessionRoutes?: boolean;
+}
+
 function accountRateLimitKey(email: string): string {
   const digest = createHash('sha256').update(email, 'utf8').digest('base64url');
   return `admin-account:${digest}`;
 }
 
-export default async function authRoutes(app: FastifyInstance) {
+export default async function authRoutes(app: FastifyInstance, options: AuthRouteOptions) {
   const checkAccountRateLimit = app.createRateLimit({
     keyGenerator: (request) => {
       const parsed = LoginBody.safeParse(request.body);
@@ -85,10 +89,12 @@ export default async function authRoutes(app: FastifyInstance) {
     return { ok: true, email: user.email, role: user.role };
   });
 
-  app.post('/logout', async (_req, reply) => {
-    clearAdminCookie(reply, env.ADMIN_COOKIE_NAME);
-    return { ok: true };
-  });
+  if (options.includeSessionRoutes ?? true) {
+    app.post('/logout', async (_req, reply) => {
+      clearAdminCookie(reply, env.ADMIN_COOKIE_NAME);
+      return { ok: true };
+    });
 
-  app.get('/me', { preHandler: requireAdmin }, async (req) => req.admin);
+    app.get('/me', { preHandler: requireAdmin }, async (req) => req.admin);
+  }
 }
