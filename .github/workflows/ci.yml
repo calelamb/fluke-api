@@ -9,17 +9,6 @@ permissions:
   contents: read
   pull-requests: read
 
-env:
-  DATABASE_URL: postgresql://fluke:fluke_test_password@localhost:5432/fluke_test
-  DIRECT_URL: postgresql://fluke:fluke_test_password@localhost:5432/fluke_test
-  JWT_SECRET: ci_only_jwt_secret_at_least_32_characters
-  WEB_ORIGIN: http://localhost:5174
-  API_PUBLIC_ORIGIN: http://localhost:4000
-  IDENTIFIER_SERVICE_URL: http://localhost:4100
-  MINIO_ROOT_USER: ci-access-key
-  MINIO_ROOT_PASSWORD: ci-secret-key-that-is-long-enough
-  OBJECT_STORAGE_BUCKET: fluke-ci-private
-
 jobs:
   verify:
     runs-on: ubuntu-24.04
@@ -37,16 +26,13 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-    env:
-      NODE_ENV: test
-      RUN_POSTGRES_INTEGRATION: "true"
-      RUN_S3_INTEGRATION: "true"
-      CI_S3_ENDPOINT: http://127.0.0.1:9000
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Load the reviewed CI test environment
+        run: cat .github/ci-test.env >> "$GITHUB_ENV"
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
           version: 10.33.0
@@ -58,9 +44,12 @@ jobs:
       - name: Start pinned local S3-compatible storage
         run: |
           set -Eeuo pipefail
+          # MinIO RELEASE.2025-04-22T22-12-26Z
           docker run --detach --name fluke-minio --publish 9000:9000 \
-            --env MINIO_ROOT_USER --env MINIO_ROOT_PASSWORD \
-            quay.io/minio/minio:RELEASE.2025-09-06T17-38-46Z server /data
+            --env MINIO_ROOT_USER="$CI_S3_ACCESS_KEY_ID" \
+            --env MINIO_ROOT_PASSWORD="$CI_S3_SECRET_ACCESS_KEY" \
+            minio/minio@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e \
+            server /data
           cleanup_minio() {
             status=$?
             if (( status != 0 )); then docker logs fluke-minio || true; fi
@@ -74,24 +63,18 @@ jobs:
             sleep 1
           done
           docker exec fluke-minio mc alias set local http://127.0.0.1:9000 \
-            "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
+            "$CI_S3_ACCESS_KEY_ID" "$CI_S3_SECRET_ACCESS_KEY"
           docker exec fluke-minio mc mb --ignore-existing local/fluke-ci-private
           docker exec fluke-minio mc anonymous set none local/fluke-ci-private
           trap - EXIT
-      - name: Generate ephemeral Apple and observer test keys
+      - name: Generate independent observer test secrets
         run: |
           set -Eeuo pipefail
-          key_file="$(mktemp)"
-          trap 'rm -f "$key_file"' EXIT
-          openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:prime256v1 -out "$key_file"
           {
-            echo 'APPLE_PRIVATE_KEY<<CI_APPLE_KEY'
-            cat "$key_file"
-            echo 'CI_APPLE_KEY'
-            echo "APPLE_TOKEN_ENCRYPTION_KEY=$(openssl rand -base64 32 | tr -d '\n')"
             echo "OBSERVER_JWT_SECRET=$(openssl rand -base64 48 | tr -d '\n')"
             echo "OBSERVER_CSRF_SECRET=$(openssl rand -base64 48 | tr -d '\n')"
           } >> "$GITHUB_ENV"
+      - run: pnpm ci:env:check
       - run: pnpm db:generate
       - run: pnpm db:migrate:deploy
       - run: pnpm db:migrate:status

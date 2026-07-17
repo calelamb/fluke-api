@@ -53,3 +53,22 @@ Commands and results:
 ## Concern / remote-only gate
 
 The local workspace has no Docker executable, so the opt-in MinIO adapter test and both production container smokes could not run locally. They are intentionally encoded as required GitHub CI gates using pinned images and immutable action revisions; no production deployment, live bucket, live secret, or production capability flag was touched.
+
+## Review remediation
+
+The initial Task 9 review correctly reproduced an Important CI collection failure: the verify job exported a partial `OBJECT_STORAGE_*` group globally and generated a partial `APPLE_*` group before Vitest, so the application environment validator failed before tests could collect.
+
+Remediation completed with focused RED/GREEN evidence:
+
+- Added `.github/ci-test.env` as the reviewed, shared verify-job environment. Test-only MinIO values use the isolated `CI_S3_*` namespace and cannot activate product storage validation.
+- The verify job now generates only the complete observer-secret pair, loads the shared fixture, and runs `pnpm ci:env:check` before migrations or tests.
+- Added a behavior-level regression that parses the shared fixture through `parseEnv` and executes the CI environment-check process under a clean environment. The initial test failed before the workflow and script existed, then passed after the fix.
+- Confirmed `RUN_S3_INTEGRATION=true` is part of the shared environment consumed by the real MinIO adapter test.
+- Digest-pinned MinIO to `sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e`, retaining its human release tag in the workflow comment.
+- Wrapped the MinIO adapter test's initial `storage.put` and object cleanup in nested `try/finally` blocks so the S3 client is destroyed on put, read, assertion, or cleanup failure.
+- Added a direct route regression proving the `observerAuth`-injected storage receives both processed photo puts and both compensation deletes after a simulated transaction commit failure.
+
+Fresh post-remediation verification on Node 22.17.0 and PostgreSQL 16:
+
+- `RUN_POSTGRES_INTEGRATION=true pnpm test:coverage` — 54 files passed; 499 passed, 1 Docker-only MinIO test skipped locally; 91.74% statements/lines, 86.62% branches, 95.11% functions.
+- Database generation/deploy/status, contracts, typecheck, lint, build, and production audit all passed.

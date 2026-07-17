@@ -8,6 +8,7 @@
   "scripts": {
     "audit": "pnpm audit --prod --audit-level=high",
     "build": "tsc",
+    "ci:env:check": "tsx scripts/check-ci-environment.ts",
     "contracts:check": "tsx scripts/check-contracts.ts",
     "contracts:generate": "tsx scripts/generate-contracts.ts",
     "db:create-admin": "tsx scripts/create-admin.ts",
