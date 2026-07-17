@@ -16,6 +16,15 @@ describe('release configuration', () => {
     expect(workflow).not.toMatch(/^\s+-e NODE_ENV \\$/mu);
   });
 
+  it('retains a stopped smoke container long enough to report its failure', () => {
+    const workflow = readRepositoryFile('.github/workflows/ci.yml');
+
+    expect(workflow).not.toContain('docker run --rm');
+    expect(workflow).toContain("docker inspect --format '{{.State.Running}}' fluke-api-ci");
+    expect(workflow).toContain('docker logs fluke-api-ci');
+    expect(workflow).toContain('docker rm --force fluke-api-ci');
+  });
+
   it('scans the complete Git history with a pinned Gitleaks version', () => {
     const workflow = readRepositoryFile('.github/workflows/ci.yml');
 
