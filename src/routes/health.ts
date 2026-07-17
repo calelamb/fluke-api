@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
+import { HealthSchema, ReadinessSchema } from '../contracts/index.js';
 
 export type ReadinessProbe = () => Promise<void>;
 
@@ -7,7 +8,7 @@ interface HealthRouteOptions {
 }
 
 const healthRoutes: FastifyPluginAsync<HealthRouteOptions> = async (fastify, options) => {
-  fastify.get('/health', async () => ({
+  fastify.get('/health', async () => HealthSchema.parse({
     status: 'ok',
     timestamp: new Date().toISOString(),
   }));
@@ -15,7 +16,7 @@ const healthRoutes: FastifyPluginAsync<HealthRouteOptions> = async (fastify, opt
   fastify.get('/ready', async (_request, reply) => {
     try {
       await options.readinessProbe();
-      return { status: 'ready' };
+      return ReadinessSchema.parse({ status: 'ready' });
     } catch (error) {
       fastify.log.warn({ err: error }, 'Readiness probe failed');
       return reply.code(503).send({ status: 'unready' });

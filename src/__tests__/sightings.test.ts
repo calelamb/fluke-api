@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import { SafeErrorSchema, SightingPageSchema } from '../contracts/index.js';
 
 vi.mock('../db.js', () => ({
   prisma: {
@@ -38,7 +39,7 @@ describe('sightings routes', () => {
   });
 
   describe('GET /api/v1/sightings', () => {
-    it('returns approved sightings only and reshapes to the public DTO', async () => {
+    it('returns approved sightings only in the public page contract', async () => {
       vi.mocked(prisma.sighting.findMany).mockResolvedValue([
         {
           id: 's1',
@@ -66,33 +67,85 @@ describe('sightings routes', () => {
       const response = await app.inject({ method: 'GET', url: '/api/v1/sightings' });
 
       expect(response.statusCode).toBe(200);
-      const body = response.json<
-        Array<{
-          id: string;
-          status: string;
-          photoUrls: string[];
-          photos: Array<{ id: string; url: string; thumbnailUrl: string; orderIndex: number }>;
-          identifiedWhales: Array<{ catalogId: string }>;
-        }>
-      >();
-      expect(body).toHaveLength(1);
-      expect(body[0].id).toBe('s1');
-      expect(body[0].status).toBe('APPROVED');
+      const body = SightingPageSchema.parse(response.json());
+      expect(body.items).toHaveLength(1);
+      expect(body.items[0].id).toBe('s1');
+      expect(body.items[0].status).toBe('APPROVED');
       // Photos must be sorted by orderIndex ascending.
-      expect(body[0].photoUrls).toEqual([
+      expect(body.items[0].photoUrls).toEqual([
         'https://cdn/photo-0.jpg',
         'https://cdn/photo-1.jpg',
       ]);
-      expect(body[0].photos.map((p) => p.url)).toEqual([
+      expect(body.items[0].photos.map((photo) => photo.url)).toEqual([
         'https://cdn/photo-0.jpg',
         'https://cdn/photo-1.jpg',
       ]);
-      expect(body[0].identifiedWhales[0].catalogId).toBe('J35');
+      expect(body.items[0].identifiedWhales[0].catalogId).toBe('J35');
 
       // The query restricts to APPROVED.
       expect(prisma.sighting.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { status: 'APPROVED' } }),
+        expect.objectContaining({
+          orderBy: [{ observedAt: 'desc' }, { id: 'desc' }],
+          take: 51,
+          where: { status: 'APPROVED' },
+        }),
       );
+    });
+
+    it('uses the ID tie breaker when equal timestamps cross a page boundary', async () => {
+      const observedAt = new Date('2026-04-25T12:00:00.000Z');
+      const makeRow = (id: string) => ({
+        id,
+        observedAt,
+        latitude: 48.5,
+        longitude: -123,
+        locationName: null,
+        ecotypeGuess: null,
+        groupSize: null,
+        behaviorNotes: null,
+        status: 'APPROVED',
+        photos: [],
+        whales: [],
+      });
+      vi.mocked(prisma.sighting.findMany)
+        .mockResolvedValueOnce([makeRow('same-time-b'), makeRow('same-time-a')] as never)
+        .mockResolvedValueOnce([makeRow('same-time-a')] as never);
+
+      const first = await app.inject({ method: 'GET', url: '/api/v1/sightings?limit=1' });
+      const firstPage = SightingPageSchema.parse(first.json());
+      expect(firstPage.items.map((item) => item.id)).toEqual(['same-time-b']);
+      if (!firstPage.page.hasMore) throw new Error('expected next page');
+
+      const second = await app.inject({
+        method: 'GET',
+        url: `/api/v1/sightings?limit=1&cursor=${encodeURIComponent(firstPage.page.nextCursor)}`,
+      });
+      expect(SightingPageSchema.parse(second.json()).items.map((item) => item.id))
+        .toEqual(['same-time-a']);
+      expect(prisma.sighting.findMany).toHaveBeenLastCalledWith(expect.objectContaining({
+        where: {
+          AND: [
+            { status: 'APPROVED' },
+            {
+              OR: [
+                { observedAt: { lt: observedAt } },
+                { observedAt, id: { lt: 'same-time-b' } },
+              ],
+            },
+          ],
+        },
+      }));
+    });
+
+    it('rejects malformed cursors with the safe 400 envelope', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/sightings?cursor=malformed',
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(SafeErrorSchema.parse(response.json()).code).toBe('VALIDATION_ERROR');
+      expect(prisma.sighting.findMany).not.toHaveBeenCalled();
     });
   });
 

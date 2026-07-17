@@ -31,6 +31,7 @@ jobs:
       DIRECT_URL: postgresql://fluke:fluke_test_password@localhost:5432/fluke_test
       JWT_SECRET: ci_only_jwt_secret_at_least_32_characters
       NODE_ENV: test
+      RUN_POSTGRES_INTEGRATION: "true"
       WEB_ORIGIN: http://localhost:5174
       API_PUBLIC_ORIGIN: http://localhost:4000
       IDENTIFIER_SERVICE_URL: http://localhost:4100

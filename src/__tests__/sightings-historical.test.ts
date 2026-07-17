@@ -1,29 +1,51 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import type { WhaleDTO } from '../contracts/index.js';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  HistoricalSightingPageSchema,
+  SafeErrorSchema,
+} from '../contracts/index.js';
+import { encodeCursor } from '../lib/cursor.js';
 
-vi.mock('../db.js', () => ({
-  prisma: {
-    whale: {
-      findMany: vi.fn(),
-      findUnique: vi.fn(),
+vi.mock('../db.js', () => {
+  const transactionClient = {
+    externalSighting: { findMany: vi.fn() },
+    sighting: { findMany: vi.fn() },
+  };
+  return {
+    prisma: {
+      ...transactionClient,
+      $transaction: vi.fn(async (callback: (client: typeof transactionClient) => unknown) =>
+        callback(transactionClient)),
     },
-    sighting: {
-      findMany: vi.fn(),
-      create: vi.fn(),
-      findUnique: vi.fn(),
-      update: vi.fn(),
-    },
-    externalSighting: {
-      findMany: vi.fn(),
-    },
-    sightingWhale: { upsert: vi.fn() },
-    auditLog: { create: vi.fn() },
-  },
-}));
+  };
+});
 
 const { prisma } = await import('../db.js');
 const { buildApp } = await import('../app.js');
+
+const observedAt = new Date('2026-07-16T18:00:00.000Z');
+
+function internalRow(id: string) {
+  return {
+    ecotypeGuess: 'RESIDENT',
+    id,
+    latitude: 48.5,
+    locationName: 'Haro Strait',
+    longitude: -123,
+    observedAt,
+    whales: [{ whaleId: 'database-whale-j35' }],
+  };
+}
+
+function externalRow(id: string) {
+  return {
+    ecotypeGuess: 'RESIDENT',
+    id,
+    latitude: 48.6,
+    longitude: -123.1,
+    observedAt,
+  };
+}
 
 describe('GET /api/v1/sightings/historical', () => {
   let app: FastifyInstance;
@@ -39,94 +61,119 @@ describe('GET /api/v1/sightings/historical', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(prisma.sighting.findMany).mockResolvedValue([]);
     vi.mocked(prisma.externalSighting.findMany).mockResolvedValue([]);
   });
 
-  it('returns approved sightings within a date range', async () => {
-    const now = new Date();
-    vi.mocked(prisma.sighting.findMany).mockResolvedValue([
-      {
-        id: 's1',
-        observedAt: new Date(now.getTime() - 1000 * 60 * 60 * 24 * 365),
-        latitude: 48.5,
-        longitude: -123.0,
-        locationName: 'Haro Strait',
-        ecotypeGuess: 'RESIDENT',
-        whales: [{ whaleId: 'j35' }, { whaleId: 'j17' }],
-      },
-    ] as never);
+  it('applies a bounded default date range and returns the page contract', async () => {
+    const before = Date.now();
+    vi.mocked(prisma.sighting.findMany).mockResolvedValue([internalRow('sighting-a')] as never);
 
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/v1/sightings/historical?from=2020-01-01&to=2030-01-01',
-    });
-    expect(res.statusCode).toBe(200);
-    const list = res.json();
-    expect(Array.isArray(list)).toBe(true);
-    if (list.length > 0) {
-      const s = list[0];
-      expect(typeof s.id).toBe('string');
-      expect(typeof s.observedAt).toBe('string');
-      expect(typeof s.latitude).toBe('number');
-      expect(typeof s.longitude).toBe('number');
-      expect(Array.isArray(s.whaleIds)).toBe(true);
+    const response = await app.inject({ method: 'GET', url: '/api/v1/sightings/historical' });
+    const after = Date.now();
+
+    expect(response.statusCode).toBe(200);
+    const page = HistoricalSightingPageSchema.parse(response.json());
+    expect(page.items.map((item) => item.id)).toEqual(['sighting-a']);
+    expect(page.page).toEqual({ hasMore: false, nextCursor: null });
+    const query = vi.mocked(prisma.sighting.findMany).mock.calls[0][0];
+    const range = query?.where?.observedAt;
+    expect(range).toMatchObject({ gte: expect.any(Date), lte: expect.any(Date) });
+    if (!range || range instanceof Date || typeof range === 'string') {
+      throw new Error('expected date range filter');
     }
+    const gte = range.gte as Date;
+    const lte = range.lte as Date;
+    expect(lte.getTime()).toBeGreaterThanOrEqual(before);
+    expect(lte.getTime()).toBeLessThanOrEqual(after);
+    expect(lte.getTime() - gte.getTime()).toBeLessThanOrEqual(366 * 24 * 60 * 60 * 1_000);
   });
 
-  it('filters by pod', async () => {
-    vi.mocked(prisma.whale.findMany).mockResolvedValue([
-      {
-        id: 'j35-id',
-        catalogId: 'J35',
-        name: 'Tahlequah',
-        pod: 'J',
-        ecotype: 'RESIDENT',
-        sex: 'FEMALE',
-        birthYear: 1998,
-        deathYear: null,
-        status: 'ALIVE',
-        biography: null,
-        distinguishingMarks: null,
-        heroImageUrl: null,
-        notableEvents: [],
-        sourceCitations: [],
-        motherId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-    ] as never);
+  it('filters database and external rows by an explicit pod and bounded range', async () => {
+    const from = '2026-01-01T00:00:00.000Z';
+    const to = '2026-07-16T23:59:59.000Z';
 
-    vi.mocked(prisma.sighting.findMany).mockResolvedValue([
-      {
-        id: 's1',
-        observedAt: new Date(),
-        latitude: 48.5,
-        longitude: -123.0,
-        locationName: 'Haro Strait',
-        ecotypeGuess: 'RESIDENT',
-        whales: [{ whaleId: 'j35-id' }],
-      },
-    ] as never);
-
-    const whales = (await app.inject({ method: 'GET', url: '/api/v1/whales' })).json<WhaleDTO[]>();
-    const jPodWhale = whales.find((whale) => whale.pod === 'J');
-    if (!jPodWhale) return; // no J-pod whale seeded; skip
-    const res = await app.inject({
+    const response = await app.inject({
       method: 'GET',
-      url: `/api/v1/sightings/historical?pod=J`,
+      url: `/api/v1/sightings/historical?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&pod=J`,
     });
-    expect(res.statusCode).toBe(200);
-    const list = res.json();
-    for (const sighting of list) {
-      expect(sighting.whaleIds.length).toBeGreaterThan(0);
-    }
+
+    expect(response.statusCode).toBe(200);
+    expect(prisma.sighting.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        status: 'APPROVED',
+        whales: { some: { whale: { pod: 'J' } } },
+      }),
+    }));
+    expect(prisma.externalSighting.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ ecotypeGuess: 'RESIDENT' }),
+    }));
+    expect(prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ maxWait: expect.any(Number), timeout: expect.any(Number) }),
+    );
   });
 
-  it('returns 400 on bad date format', async () => {
-    const res = await app.inject({
+  it('paginates a merged equal-timestamp boundary without duplicating source rows', async () => {
+    vi.mocked(prisma.sighting.findMany)
+      .mockResolvedValueOnce([internalRow('internal-a')] as never)
+      .mockResolvedValueOnce([]);
+    vi.mocked(prisma.externalSighting.findMany)
+      .mockResolvedValueOnce([externalRow('external-a')] as never)
+      .mockResolvedValueOnce([externalRow('external-a')] as never);
+
+    const first = await app.inject({
       method: 'GET',
-      url: '/api/v1/sightings/historical?from=not-a-date',
+      url: '/api/v1/sightings/historical?limit=1',
     });
-    expect(res.statusCode).toBe(400);
+    const firstPage = HistoricalSightingPageSchema.parse(first.json());
+    expect(firstPage.items.map((item) => item.id)).toEqual(['internal-a']);
+    if (!firstPage.page.hasMore) throw new Error('expected next page');
+
+    const second = await app.inject({
+      method: 'GET',
+      url: `/api/v1/sightings/historical?limit=1&cursor=${encodeURIComponent(firstPage.page.nextCursor)}`,
+    });
+    const secondPage = HistoricalSightingPageSchema.parse(second.json());
+    expect(secondPage.items.map((item) => item.id)).toEqual(['ext:external-a']);
+    expect(new Set([...firstPage.items, ...secondPage.items].map((item) => item.id)).size).toBe(2);
+  });
+
+  it.each([
+    '/api/v1/sightings/historical?from=not-a-date',
+    '/api/v1/sightings/historical?from=2026-07-17T00%3A00%3A00.000Z&to=2026-07-16T00%3A00%3A00.000Z',
+    '/api/v1/sightings/historical?from=2024-01-01T00%3A00%3A00.000Z&to=2026-01-02T00%3A00%3A00.000Z',
+    '/api/v1/sightings/historical?pod=Q',
+    '/api/v1/sightings/historical?cursor=malformed',
+    '/api/v1/sightings/historical?limit=101',
+  ])('returns the safe 400 envelope for invalid query %s', async (url) => {
+    const response = await app.inject({ method: 'GET', url });
+
+    expect(response.statusCode).toBe(400);
+    expect(SafeErrorSchema.parse(response.json()).code).toBe('VALIDATION_ERROR');
+    expect(prisma.sighting.findMany).not.toHaveBeenCalled();
+    expect(prisma.externalSighting.findMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects a forged cursor with an oversized historical window', async () => {
+    const cursor = encodeCursor({
+      from: '2020-01-01T00:00:00.000Z',
+      id: 'internal-a',
+      kind: 'historical-sightings',
+      observedAt: '2026-07-16T18:00:00.000Z',
+      pod: null,
+      source: 'internal',
+      to: '2026-07-16T23:59:59.000Z',
+      version: 1,
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/sightings/historical?cursor=${encodeURIComponent(cursor)}`,
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(SafeErrorSchema.parse(response.json()).code).toBe('VALIDATION_ERROR');
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });

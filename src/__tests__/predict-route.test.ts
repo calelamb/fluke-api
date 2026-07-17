@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import type { Prisma } from '@prisma/client';
+import { PredictionSchema, SafeErrorSchema } from '../contracts/index.js';
 
 vi.mock('../db.js', () => ({
   prisma: {
@@ -77,10 +78,56 @@ describe('GET /api/v1/predict', () => {
       url: '/api/v1/predict?whaleId=wh_predict_test_1&horizon=24h',
     });
     expect(res.statusCode).toBe(200);
-    const body = res.json();
+    const body = PredictionSchema.parse(res.json());
     expect(body.cells.length).toBe(2);
     expect(body.confidence).toBe(0.8);
     expect(body.modelVersion).toBe('markov-v1');
     expect(typeof body.computedAt).toBe('string');
+    expect(res.headers.etag).toMatch(/^W\/"[A-Za-z0-9_-]+"$/u);
+    expect(res.headers['cache-control']).toContain('public');
+  });
+
+  it('fails closed when stored prediction output violates the contract', async () => {
+    vi.mocked(prisma.predictionGrid.findUnique).mockResolvedValue({
+      id: 'pred-invalid',
+      subjectKind: 'WHALE',
+      subjectId: 'whale-invalid',
+      horizonHours: 24,
+      cells: [{ lat: 91, lng: -123, probability: 0.5 }],
+      confidence: '0.8' as unknown as Prisma.Decimal,
+      modelVersion: 'markov-v1',
+      computedAt: new Date('2026-05-01T10:00:00Z'),
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/predict?whaleId=whale-invalid&horizon=24h',
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(SafeErrorSchema.parse(response.json()).code).toBe('INTERNAL_ERROR');
+    expect(response.body).not.toContain('91');
+  });
+
+  it('bounds a stalled database read with the canonical retryable response', async () => {
+    vi.mocked(prisma.predictionGrid.findUnique).mockReturnValue(
+      new Promise(() => undefined) as never,
+    );
+    const isolatedApp = await buildApp({ publicReadTimeoutMs: 25, silent: true });
+
+    try {
+      const response = await isolatedApp.inject({
+        method: 'GET',
+        url: '/api/v1/predict?whaleId=slow-whale&horizon=24h',
+      });
+
+      expect(response.statusCode).toBe(503);
+      expect(SafeErrorSchema.parse(response.json())).toMatchObject({
+        code: 'UPSTREAM_UNAVAILABLE',
+        retryable: true,
+      });
+    } finally {
+      await isolatedApp.close();
+    }
   });
 });

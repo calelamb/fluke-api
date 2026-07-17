@@ -25,6 +25,7 @@ import authRoutes from './routes/auth.js';
 import capabilitiesRoutes from './routes/capabilities.js';
 import externalSightingsRoutes from './routes/external-sightings.js';
 import healthRoutes, { type ReadinessProbe } from './routes/health.js';
+import historicalSightingsRoutes from './routes/historical-sightings.js';
 import identifyRoutes from './routes/identify.js';
 import predictRoutes from './routes/predict.js';
 import sightingPhotosRoutes from './routes/sighting-photos.js';
@@ -35,6 +36,7 @@ import whalesRoutes from './routes/whales.js';
 export interface BuildAppOptions {
   readonly features?: FeatureConfig;
   readonly publicReadRateLimitMax?: number;
+  readonly publicReadTimeoutMs?: number;
   readonly readinessProbe?: ReadinessProbe;
   readonly silent?: boolean;
   readonly trustProxy?: false | number;
@@ -42,6 +44,7 @@ export interface BuildAppOptions {
 
 const READINESS_TIMEOUT_MS = 5_000;
 const PUBLIC_READ_RATE_LIMIT_MAX = 120;
+const PUBLIC_READ_TIMEOUT_MS = 5_000;
 
 function positiveInteger(value: number, name: string): number {
   if (!Number.isInteger(value) || value <= 0) {
@@ -91,6 +94,10 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       options.publicReadRateLimitMax ?? PUBLIC_READ_RATE_LIMIT_MAX,
       'publicReadRateLimitMax',
     ),
+    publicReadTimeoutMs: positiveInteger(
+      options.publicReadTimeoutMs ?? PUBLIC_READ_TIMEOUT_MS,
+      'publicReadTimeoutMs',
+    ),
     readinessProbe: options.readinessProbe ?? defaultReadinessProbe,
     silent: options.silent ?? false,
     trustProxy: options.trustProxy ?? (isProduction ? 1 : false),
@@ -98,6 +105,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   const app = Fastify({
     forceCloseConnections: 'idle',
     genReqId: (request) => resolveRequestId(request.headers['x-request-id']),
+    handlerTimeout: resolvedOptions.publicReadTimeoutMs,
     logger: resolvedOptions.silent
       ? false
       : isProduction
@@ -256,6 +264,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   });
   await app.register(whalesRoutes, { prefix: '/api/v1' });
   await app.register(sightingsRoutes, { prefix: '/api/v1' });
+  await app.register(historicalSightingsRoutes, { prefix: '/api/v1' });
   await app.register(externalSightingsRoutes, { prefix: '/api/v1' });
   await app.register(predictRoutes, { prefix: '/api/v1' });
   if (resolvedOptions.features.submissions) {

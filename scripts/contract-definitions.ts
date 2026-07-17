@@ -1,8 +1,9 @@
-import { z, type ZodType } from 'zod';
+import type { ZodType } from 'zod';
 import {
   CapabilitiesSchema,
   ExternalSightingPageSchema,
   HistoricalSightingPageSchema,
+  HealthSchema,
   IdentifyResponseSchema,
   PredictionSchema,
   RELEASE_A_CAPABILITIES,
@@ -21,11 +22,6 @@ export interface ContractDefinition {
 }
 
 const FIXTURE_TIMESTAMP = '2026-07-16T18:00:00.000Z';
-
-const HealthSchema = z.object({
-  status: z.literal('ok'),
-  timestamp: z.string().datetime(),
-});
 
 const whaleFixture = {
   biography: 'Synthetic biography for contract testing only.',
