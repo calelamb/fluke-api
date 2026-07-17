@@ -61,6 +61,28 @@ describe('release configuration', () => {
     expect(packageJson.dependencies?.prisma).toBe('5.22.0');
   });
 
+  it('runs every scheduled job through the compiled fenced CLI', () => {
+    const packageJson = JSON.parse(readRepositoryFile('package.json')) as {
+      scripts?: Record<string, string>;
+    };
+
+    expect(packageJson.scripts?.['jobs:acartia']).toBe('tsx scripts/run-job.ts acartia');
+    expect(packageJson.scripts?.['jobs:gbif']).toBe('tsx scripts/run-job.ts gbif');
+    expect(packageJson.scripts?.['jobs:predictions']).toBe('tsx scripts/run-job.ts predictions');
+    expect(packageJson.scripts?.['jobs:acartia:runtime']).toBe(
+      'node dist/scripts/run-job.js acartia',
+    );
+    expect(packageJson.scripts?.['jobs:gbif:runtime']).toBe(
+      'node dist/scripts/run-job.js gbif',
+    );
+    expect(packageJson.scripts?.['jobs:predictions:runtime']).toBe(
+      'node dist/scripts/run-job.js predictions',
+    );
+    expect(packageJson.scripts?.['ingest:acartia']).toBeUndefined();
+    expect(packageJson.scripts?.['ingest:gbif']).toBeUndefined();
+    expect(packageJson.scripts?.['predict:compute']).toBeUndefined();
+  });
+
   it('keeps the required migration marker aligned with the latest migration', () => {
     const readiness = readRepositoryFile('src/ops/migration-readiness.ts');
     const migration = readRepositoryFile(
