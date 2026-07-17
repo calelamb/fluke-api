@@ -83,6 +83,24 @@ describe('release configuration', () => {
     expect(packageJson.scripts?.['predict:compute']).toBeUndefined();
   });
 
+  it.each([
+    ['railway.acartia.json', 'npm run jobs:acartia:runtime', '15 */6 * * *'],
+    ['railway.gbif.json', 'npm run jobs:gbif:runtime', '15 2 * * 0'],
+    ['railway.predictions.json', 'npm run jobs:predictions:runtime', '0 4 * * *'],
+  ] as const)('defines a fail-closed Railway cron in %s', (file, startCommand, cronSchedule) => {
+    const config = JSON.parse(readRepositoryFile(file)) as {
+      deploy?: Record<string, unknown>;
+    };
+
+    expect(config.deploy).toMatchObject({
+      cronSchedule,
+      restartPolicyType: 'NEVER',
+      startCommand,
+    });
+    expect(config.deploy).not.toHaveProperty('preDeployCommand');
+    expect(config.deploy).not.toHaveProperty('healthcheckPath');
+  });
+
   it('keeps the required migration marker aligned with the latest migration', () => {
     const readiness = readRepositoryFile('src/ops/migration-readiness.ts');
     const migration = readRepositoryFile(
