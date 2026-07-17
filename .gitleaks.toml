@@ -1,0 +1,11 @@
+title = "fluke-api gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Known non-secret JWT value used only by isolated tests"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^(?:apps/api/)?src/__tests__/setup\.ts$''']
+regexes = ['''test_jwt_secret_must_be_at_least_32_chars_long''']

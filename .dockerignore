@@ -1,0 +1,14 @@
+.git
+.github
+.superpowers
+node_modules
+dist
+coverage
+uploads
+docs
+*.md
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store

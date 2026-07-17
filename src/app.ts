@@ -7,13 +7,14 @@ import sensible from '@fastify/sensible';
 import staticPlugin from '@fastify/static';
 import { mkdir } from 'node:fs/promises';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { prisma } from './db.js';
 import { env, isProduction } from './env.js';
 import { resolveUploadsDir } from './lib/storage.js';
 import adminRoutes from './routes/admin.js';
 import authRoutes from './routes/auth.js';
 import capabilitiesRoutes from './routes/capabilities.js';
 import externalSightingsRoutes from './routes/external-sightings.js';
-import healthRoutes from './routes/health.js';
+import healthRoutes, { type ReadinessProbe } from './routes/health.js';
 import identifyRoutes from './routes/identify.js';
 import predictRoutes from './routes/predict.js';
 import sightingPhotosRoutes from './routes/sighting-photos.js';
@@ -21,12 +22,35 @@ import sightingsRoutes from './routes/sightings.js';
 import whalesRoutes from './routes/whales.js';
 
 export interface BuildAppOptions {
-  silent?: boolean;
+  readonly readinessProbe?: ReadinessProbe;
+  readonly silent?: boolean;
+}
+
+const READINESS_TIMEOUT_MS = 5_000;
+
+async function defaultReadinessProbe(): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => reject(new Error('Database readiness probe timed out')), READINESS_TIMEOUT_MS);
+    timeout.unref();
+  });
+
+  try {
+    await Promise.race([prisma.$queryRaw`SELECT 1`, timeoutPromise]);
+  } finally {
+    if (timeout !== undefined) {
+      clearTimeout(timeout);
+    }
+  }
 }
 
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
+  const resolvedOptions = Object.freeze({
+    readinessProbe: options.readinessProbe ?? defaultReadinessProbe,
+    silent: options.silent ?? false,
+  });
   const app = Fastify({
-    logger: options.silent
+    logger: resolvedOptions.silent
       ? false
       : isProduction
         ? true
@@ -76,7 +100,10 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     });
   }
 
-  await app.register(healthRoutes, { prefix: '/api/v1' });
+  await app.register(healthRoutes, {
+    prefix: '/api/v1',
+    readinessProbe: resolvedOptions.readinessProbe,
+  });
   await app.register(capabilitiesRoutes, { prefix: '/api/v1' });
   await app.register(whalesRoutes, { prefix: '/api/v1' });
   await app.register(sightingsRoutes, { prefix: '/api/v1' });
