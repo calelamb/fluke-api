@@ -94,7 +94,7 @@ describe('PostgresJobLeaseStore', () => {
     expect(transaction.jobRunEvent.create).not.toHaveBeenCalled();
   });
 
-  it('expires a released lease without deleting its monotonic fence', async () => {
+  it('expires a released lease before database time without deleting its monotonic fence', async () => {
     const executeRaw = vi.fn(async () => 1);
     const client = { $executeRaw: executeRaw } as unknown as PrismaClient;
     const store = new PostgresJobLeaseStore(client);
@@ -102,6 +102,10 @@ describe('PostgresJobLeaseStore', () => {
     await store.release(lease);
 
     expect(executeRaw).toHaveBeenCalledOnce();
+    const [query] = executeRaw.mock.calls[0] ?? [];
+    expect(Array.from(query as TemplateStringsArray).join('')).toContain(
+      `SET "lease_expires_at" = CURRENT_TIMESTAMP - INTERVAL '1 millisecond'`,
+    );
     expect(client).not.toHaveProperty('jobLease.deleteMany');
   });
 });
