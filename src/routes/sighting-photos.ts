@@ -13,7 +13,7 @@ import { requireAdmin, resolveOptionalAdmin, type AdminClaims } from '../lib/aut
 import { requireCsrf } from '../lib/csrf.js';
 import { resolveOptionalObserver } from '../lib/observer-auth.js';
 import { IdempotencyConflictError } from '../lib/idempotency.js';
-import { buildPhotoFilename, getStorageBackend } from '../lib/storage.js';
+import { buildPhotoFilename, type StorageBackend } from '../lib/storage.js';
 import { cleanupPhotoObjects, storePhotoPair } from '../services/sighting-photo-storage.js';
 import {
   PHOTO_UPLOAD_TOKEN_TYPE,
@@ -235,10 +235,10 @@ async function persistPhoto(
   authorization: UploadAuthorization,
   variants: PhotoVariants,
   idempotency: PhotoIdempotency | null,
+  storage: StorageBackend,
   database: Pick<Prisma.TransactionClient, 'sightingPhoto'> = prisma,
   onStored?: (keys: readonly string[]) => void,
 ): Promise<Awaited<ReturnType<typeof prisma.sightingPhoto.create>>> {
-  const storage = getStorageBackend();
   const prefix = `sightings/${authorization.sightingId}`;
   const photoId = idempotency?.photoId ?? randomUUID();
   const stem = idempotency === null
@@ -284,8 +284,8 @@ async function persistIdempotentPhoto(
   authorization: UploadAuthorization,
   variants: PhotoVariants,
   idempotency: PhotoIdempotency,
+  storage: StorageBackend,
 ): Promise<PersistedPhotoResult> {
-  const storage = getStorageBackend();
   let storedKeys: readonly string[] = [];
   try {
     return await prisma.$transaction(async (transaction) => {
@@ -293,7 +293,7 @@ async function persistIdempotentPhoto(
       const replay = await findPhotoReplayWithClient(transaction, idempotency, authorization);
       if (replay !== null) return Object.freeze({ photo: replay, replayed: true });
       const photo = await persistPhoto(
-        request, authorization, variants, idempotency, transaction,
+        request, authorization, variants, idempotency, storage, transaction,
         (keys) => { storedKeys = keys; },
       );
       return Object.freeze({ photo, replayed: false });
@@ -330,6 +330,7 @@ async function handlePhotoUpload(
   fastify: FastifyInstance,
   request: FastifyRequest<{ Params: { id: string } }>,
   reply: FastifyReply,
+  storage: StorageBackend,
 ): Promise<unknown> {
   const authorization = await authorizePhotoUpload(fastify, request, reply);
   if (!authorization) return reply;
@@ -345,9 +346,9 @@ async function handlePhotoUpload(
   }
   const persisted = idempotency === null
     ? Object.freeze({
-      photo: await persistPhoto(request, authorization, variants, null), replayed: false,
+      photo: await persistPhoto(request, authorization, variants, null, storage), replayed: false,
     })
-    : await persistIdempotentPhoto(request, authorization, variants, idempotency);
+    : await persistIdempotentPhoto(request, authorization, variants, idempotency, storage);
   const photo = persisted.photo;
   await recordAdminPhotoAudit(
     authorization.admin, photo.id, authorization.sightingId, source.body.byteLength,
@@ -357,6 +358,7 @@ async function handlePhotoUpload(
 
 interface SightingPhotosRouteOptions {
   readonly accounts: boolean;
+  readonly storage: () => StorageBackend;
   readonly submissions: boolean;
 }
 
@@ -377,7 +379,7 @@ const sightingPhotosRoutes: FastifyPluginAsync<SightingPhotosRouteOptions> = asy
         rateLimit: { max: 25, timeWindow: '1 hour' },
       },
     },
-    (request, reply) => handlePhotoUpload(fastify, request, reply),
+    (request, reply) => handlePhotoUpload(fastify, request, reply, options.storage()),
   );
 
   fastify.get<{ Params: { photoId: string }; Querystring: { variant?: string } }>(
@@ -402,10 +404,10 @@ const sightingPhotosRoutes: FastifyPluginAsync<SightingPhotosRouteOptions> = asy
         || (observer !== null && photo.sighting.observerUserId === observer.id);
       if (!mayRead) return reply.code(403).send({ error: 'Media is private' });
 
-      const storage = getStorageBackend();
       const key = request.query.variant === 'thumbnail'
         ? thumbnailKey(photo.storageKey)
         : photo.storageKey;
+      const storage = options.storage();
       const location = storage.signedReadUrl
         ? await storage.signedReadUrl(key)
         : storage.publicUrl(key);

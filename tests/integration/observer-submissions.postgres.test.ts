@@ -25,6 +25,29 @@ const integrationUploadsRoot = postgresEnabled
 if (postgresEnabled) {
   process.env.UPLOADS_DIR = integrationUploadsRoot;
   process.env.OBSERVER_JWT_SECRET = 'task7-observer-jwt-secret-that-is-more-than-forty-three-characters';
+  process.env.OBSERVER_CSRF_SECRET = 'task9-observer-csrf-secret-that-is-more-than-forty-three-characters';
+}
+
+interface ObserverCookies {
+  readonly csrf: string;
+  readonly header: string;
+  readonly session: string;
+}
+
+function observerCookies(response: { headers: Record<string, unknown> }): ObserverCookies {
+  const raw = response.headers['set-cookie'];
+  const values = Array.isArray(raw) ? raw.map(String) : [String(raw ?? '')];
+  const pairs = values.map((value) => value.split(';', 1)[0]);
+  const findValue = (name: string): string => {
+    const pair = pairs.find((candidate) => candidate.startsWith(`${name}=`));
+    if (pair === undefined) throw new Error(`Missing ${name} cookie`);
+    return pair.slice(name.length + 1);
+  };
+  return Object.freeze({
+    csrf: findValue('fluke_csrf'),
+    header: pairs.join('; '),
+    session: findValue('fluke_observer'),
+  });
 }
 
 function readRepositoryFile(relativePath: string): string {
@@ -452,6 +475,180 @@ describe.runIf(postgresEnabled)('observer submissions against PostgreSQL', () =>
     } finally {
       await prisma.sighting.deleteMany({ where: { id: { in: ids } } });
       await prisma.user.deleteMany({ where: { id: { in: [firstUserId, secondUserId] } } });
+      await app.close();
+    }
+  });
+
+  it('runs observer sign-in, isolated submission, deletion, and session invalidation end to end', async () => {
+    const suffix = `${process.pid}-${Date.now()}`;
+    const subjects = [`apple-one-${suffix}`, `apple-two-${suffix}`];
+    const removedKeys: string[] = [];
+    const revokedTokens: string[] = [];
+    const appleAuth = Object.freeze({
+      exchangeAppleAuthorizationCode: async (code: string) => Object.freeze({
+        accessToken: `access-${code}`,
+        expiresIn: 3600,
+        identityToken: `exchange-${code}`,
+        refreshToken: `refresh-${code}`,
+        subject: code.endsWith('-two') ? subjects[1] : subjects[0],
+      }),
+      revokeAppleRefreshToken: async (token: string) => { revokedTokens.push(token); },
+      verifyAppleIdentityToken: async (token: string) => Object.freeze({
+        email: `${token}@example.invalid`,
+        emailVerified: true,
+        subject: token.endsWith('-two') ? subjects[1] : subjects[0],
+      }),
+    });
+    const storage = Object.freeze({
+      publicUrl: () => { throw new Error('private storage has no public URL'); },
+      put: async () => Object.freeze({ key: 'unused', size: 1 }),
+      remove: async (key: string) => { removedKeys.push(key); },
+      signedReadUrl: async (key: string) => `https://signed.example.invalid/${key}?ttl=300`,
+    });
+    const tokenCrypto = Object.freeze({
+      decryptToken: (ciphertext: string) => ciphertext.replace(/^encrypted:/u, ''),
+      encryptToken: (token: string) => `encrypted:${token}`,
+    });
+    const { buildApp } = await import('../../src/app.js');
+    const app = await buildApp({
+      features: Object.freeze({ accounts: true, identification: false, submissions: true }),
+      observerAuth: { appleAuth, storage, tokenCrypto },
+      silent: true,
+    });
+    await app.ready();
+    const createdSightingIds: string[] = [];
+
+    const signIn = async (identity: 'one' | 'two') => {
+      const response = await app.inject({
+        method: 'POST',
+        payload: {
+          authorizationCode: `code-${identity}`,
+          fullName: `Observer ${identity}`,
+          identityToken: `identity-${identity}`,
+          nonce: `nonce-${identity}-${'n'.repeat(32)}`,
+        },
+        remoteAddress: identity === 'one' ? '127.10.0.1' : '127.10.0.2',
+        url: '/api/v1/auth/apple',
+      });
+      expect(response.statusCode).toBe(200);
+      return observerCookies(response);
+    };
+
+    try {
+      const firstCookies = await signIn('one');
+      const secondCookies = await signIn('two');
+      const firstUser = await prisma.user.findUniqueOrThrow({ where: { appleSub: subjects[0] } });
+      const secondUser = await prisma.user.findUniqueOrThrow({ where: { appleSub: subjects[1] } });
+      expect(firstUser.appleRefreshTokenCiphertext).toBe('encrypted:refresh-code-one');
+      expect(JSON.stringify(firstUser)).not.toContain('access-code-one');
+
+      const submissionId = '8d2704ca-7d31-49a3-9875-74126453734e';
+      const submission = await app.inject({
+        headers: {
+          cookie: firstCookies.header,
+          'idempotency-key': submissionId,
+          'x-fluke-csrf': firstCookies.csrf,
+        },
+        method: 'POST',
+        payload: {
+          clientSubmissionId: submissionId,
+          latitude: 48.5,
+          longitude: -123,
+          observedAt: '2026-07-17T12:00:00.000Z',
+          observerEmail: 'first@example.invalid',
+        },
+        remoteAddress: '127.10.0.3',
+        url: '/api/v1/sightings',
+      });
+      expect(submission.statusCode).toBe(201);
+      const sightingId = submission.json<{ id: string }>().id;
+      createdSightingIds.push(sightingId);
+
+      const otherLogbook = await app.inject({
+        headers: { cookie: secondCookies.header },
+        method: 'GET',
+        url: '/api/v1/sightings/me',
+      });
+      expect(otherLogbook.statusCode).toBe(200);
+      expect(otherLogbook.json<{ items: unknown[] }>().items).toEqual([]);
+
+      const privatePhoto = await prisma.sightingPhoto.create({
+        data: {
+          orderIndex: 0,
+          sightingId,
+          storageKey: `sightings/${sightingId}/private-1024.webp`,
+          thumbnailUrl: `/api/v1/media/private-${suffix}?variant=thumbnail`,
+          url: `/api/v1/media/private-${suffix}`,
+        },
+      });
+      const forbiddenMedia = await app.inject({
+        headers: { cookie: secondCookies.header },
+        method: 'GET',
+        url: `/api/v1/media/${privatePhoto.id}`,
+      });
+      expect(forbiddenMedia.statusCode).toBe(403);
+      expect(forbiddenMedia.body).not.toContain(privatePhoto.storageKey);
+
+      await prisma.sighting.update({ where: { id: sightingId }, data: { status: 'APPROVED' } });
+      const publicMedia = await app.inject({ method: 'GET', url: `/api/v1/media/${privatePhoto.id}` });
+      expect(publicMedia.statusCode).toBe(302);
+      expect(publicMedia.headers.location).toContain('ttl=300');
+
+      const pending = await prisma.sighting.create({
+        data: {
+          latitude: 48.6,
+          longitude: -123.1,
+          observedAt: new Date(),
+          observerEmail: 'first@example.invalid',
+          observerUserId: firstUser.id,
+        },
+      });
+      createdSightingIds.push(pending.id);
+      await prisma.sightingPhoto.create({
+        data: {
+          orderIndex: 0,
+          sightingId: pending.id,
+          storageKey: `sightings/${pending.id}/delete-1024.webp`,
+          thumbnailUrl: `/api/v1/media/delete-${suffix}?variant=thumbnail`,
+          url: `/api/v1/media/delete-${suffix}`,
+        },
+      });
+
+      const deletion = await app.inject({
+        headers: { cookie: firstCookies.header, 'x-fluke-csrf': firstCookies.csrf },
+        method: 'DELETE',
+        payload: {
+          authorizationCode: 'code-one',
+          identityToken: 'identity-one',
+          nonce: `delete-${'n'.repeat(32)}`,
+        },
+        url: '/api/v1/auth/account',
+      });
+      expect(deletion.statusCode).toBe(200);
+      await expect(prisma.user.findUnique({ where: { id: firstUser.id } })).resolves.toBeNull();
+      await expect(prisma.sighting.findUnique({ where: { id: pending.id } })).resolves.toBeNull();
+      await expect(prisma.sighting.findUnique({ where: { id: sightingId } })).resolves.toMatchObject({
+        observerEmail: 'deleted-observer@privacy.invalid',
+        observerName: null,
+        observerUserId: null,
+      });
+      expect(revokedTokens.sort()).toEqual(['refresh-code-one']);
+      expect(removedKeys).toEqual(expect.arrayContaining([
+        `sightings/${pending.id}/delete-1024.webp`,
+        `sightings/${pending.id}/delete-256.webp`,
+      ]));
+
+      const staleSession = await app.inject({
+        headers: { cookie: `fluke_observer=${firstCookies.session}` },
+        method: 'GET',
+        url: '/api/v1/sightings/me',
+      });
+      expect(staleSession.statusCode).toBe(401);
+      expect(staleSession.body).not.toContain(firstUser.email ?? 'first@example.invalid');
+      expect(secondUser.role).toBe('OBSERVER');
+    } finally {
+      await prisma.sighting.deleteMany({ where: { id: { in: createdSightingIds } } });
+      await prisma.user.deleteMany({ where: { appleSub: { in: subjects } } });
       await app.close();
     }
   });

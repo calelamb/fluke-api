@@ -378,9 +378,13 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     await app.register(sightingSubmissionRoutes, { prefix: '/api/v1' });
   }
   if (resolvedOptions.features.submissions || resolvedOptions.features.accounts) {
+    const injectedStorage = resolvedOptions.observerAuth?.storage;
     await app.register(sightingPhotosRoutes, {
       prefix: '/api/v1',
       accounts: resolvedOptions.features.accounts,
+      storage: injectedStorage === undefined
+        ? getStorageBackend
+        : () => injectedStorage,
       submissions: resolvedOptions.features.submissions,
     });
   }

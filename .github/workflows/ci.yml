@@ -9,6 +9,17 @@ permissions:
   contents: read
   pull-requests: read
 
+env:
+  DATABASE_URL: postgresql://fluke:fluke_test_password@localhost:5432/fluke_test
+  DIRECT_URL: postgresql://fluke:fluke_test_password@localhost:5432/fluke_test
+  JWT_SECRET: ci_only_jwt_secret_at_least_32_characters
+  WEB_ORIGIN: http://localhost:5174
+  API_PUBLIC_ORIGIN: http://localhost:4000
+  IDENTIFIER_SERVICE_URL: http://localhost:4100
+  MINIO_ROOT_USER: ci-access-key
+  MINIO_ROOT_PASSWORD: ci-secret-key-that-is-long-enough
+  OBJECT_STORAGE_BUCKET: fluke-ci-private
+
 jobs:
   verify:
     runs-on: ubuntu-24.04
@@ -27,26 +38,60 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
-      DATABASE_URL: postgresql://fluke:fluke_test_password@localhost:5432/fluke_test
-      DIRECT_URL: postgresql://fluke:fluke_test_password@localhost:5432/fluke_test
-      JWT_SECRET: ci_only_jwt_secret_at_least_32_characters
       NODE_ENV: test
       RUN_POSTGRES_INTEGRATION: "true"
-      WEB_ORIGIN: http://localhost:5174
-      API_PUBLIC_ORIGIN: http://localhost:4000
-      IDENTIFIER_SERVICE_URL: http://localhost:4100
+      RUN_S3_INTEGRATION: "true"
+      CI_S3_ENDPOINT: http://127.0.0.1:9000
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
-      - uses: pnpm/action-setup@v4
+          persist-credentials: false
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
           version: 10.33.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22.17.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Start pinned local S3-compatible storage
+        run: |
+          set -Eeuo pipefail
+          docker run --detach --name fluke-minio --publish 9000:9000 \
+            --env MINIO_ROOT_USER --env MINIO_ROOT_PASSWORD \
+            quay.io/minio/minio:RELEASE.2025-09-06T17-38-46Z server /data
+          cleanup_minio() {
+            status=$?
+            if (( status != 0 )); then docker logs fluke-minio || true; fi
+            docker rm --force fluke-minio >/dev/null 2>&1 || true
+            exit "$status"
+          }
+          trap cleanup_minio EXIT
+          for attempt in {1..30}; do
+            if docker exec fluke-minio mc ready local >/dev/null 2>&1; then break; fi
+            if (( attempt == 30 )); then exit 1; fi
+            sleep 1
+          done
+          docker exec fluke-minio mc alias set local http://127.0.0.1:9000 \
+            "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
+          docker exec fluke-minio mc mb --ignore-existing local/fluke-ci-private
+          docker exec fluke-minio mc anonymous set none local/fluke-ci-private
+          trap - EXIT
+      - name: Generate ephemeral Apple and observer test keys
+        run: |
+          set -Eeuo pipefail
+          key_file="$(mktemp)"
+          trap 'rm -f "$key_file"' EXIT
+          openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:prime256v1 -out "$key_file"
+          {
+            echo 'APPLE_PRIVATE_KEY<<CI_APPLE_KEY'
+            cat "$key_file"
+            echo 'CI_APPLE_KEY'
+            echo "APPLE_TOKEN_ENCRYPTION_KEY=$(openssl rand -base64 32 | tr -d '\n')"
+            echo "OBSERVER_JWT_SECRET=$(openssl rand -base64 48 | tr -d '\n')"
+            echo "OBSERVER_CSRF_SECRET=$(openssl rand -base64 48 | tr -d '\n')"
+          } >> "$GITHUB_ENV"
       - run: pnpm db:generate
       - run: pnpm db:migrate:deploy
       - run: pnpm db:migrate:status
@@ -60,36 +105,111 @@ jobs:
       - run: pnpm test:coverage
       - run: pnpm build
       - run: pnpm audit
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: coverage
           path: coverage/
       - name: Scan changed commits with Gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_COMMENTS: "false"
           GITLEAKS_VERSION: 8.30.1
       - name: Scan full Git history with Gitleaks
         run: gitleaks git --log-opts=--all --redact --no-banner .
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
+      - name: Stop local S3 service
+        if: always()
+        run: |
+          docker logs fluke-minio || true
+          docker rm --force fluke-minio >/dev/null 2>&1 || true
+
+  container-smoke:
+    needs: verify
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [release-a, release-b]
+    services:
+      postgres:
+        image: postgres:16.4-bookworm
+        env:
+          POSTGRES_USER: fluke
+          POSTGRES_PASSWORD: fluke_test_password
+          POSTGRES_DB: fluke_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fluke -d fluke_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.17.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:migrate:deploy
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           push: false
           tags: fluke-api:ci
           load: true
-      - name: Smoke container readiness
+      - name: Generate ephemeral production-smoke keys
         run: |
-          docker run -d --name fluke-api-ci --network host \
-            -e DATABASE_URL \
-            -e DIRECT_URL \
-            -e JWT_SECRET \
+          set -Eeuo pipefail
+          key_file="$(mktemp)"
+          trap 'rm -f "$key_file"' EXIT
+          openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:prime256v1 -out "$key_file"
+          {
+            echo 'APPLE_PRIVATE_KEY<<CI_APPLE_KEY'
+            cat "$key_file"
+            echo 'CI_APPLE_KEY'
+            echo "APPLE_TOKEN_ENCRYPTION_KEY=$(openssl rand -base64 32 | tr -d '\n')"
+            echo "OBSERVER_JWT_SECRET=$(openssl rand -base64 48 | tr -d '\n')"
+            echo "OBSERVER_CSRF_SECRET=$(openssl rand -base64 48 | tr -d '\n')"
+          } >> "$GITHUB_ENV"
+      - name: Smoke ${{ matrix.mode }} production container
+        env:
+          RELEASE_MODE: ${{ matrix.mode }}
+        run: |
+          set -Eeuo pipefail
+          cleanup() {
+            status=$?
+            docker logs fluke-api-ci || true
+            docker rm --force fluke-api-ci >/dev/null 2>&1 || true
+            exit "$status"
+          }
+          trap cleanup EXIT
+          if [[ "$RELEASE_MODE" == release-b ]]; then
+            accounts=true
+            submissions=true
+            acknowledgement=true
+            expected='{"accounts":true,"identification":false,"submissions":true}'
+          else
+            accounts=false
+            submissions=false
+            acknowledgement=false
+            expected='{"accounts":false,"identification":false,"submissions":false}'
+          fi
+          docker run --detach --name fluke-api-ci --network host \
+            --add-host objects.ci.invalid:8.8.8.8 \
+            -e DATABASE_URL -e DIRECT_URL -e JWT_SECRET \
+            -e APPLE_PRIVATE_KEY -e APPLE_TOKEN_ENCRYPTION_KEY \
+            -e OBSERVER_JWT_SECRET -e OBSERVER_CSRF_SECRET \
             -e NODE_ENV=production \
             -e WEB_ORIGIN=https://web.ci.invalid \
             -e API_PUBLIC_ORIGIN=https://api.ci.invalid \
-            -e IDENTIFIER_SERVICE_URL \
             -e STORAGE_BACKEND=s3 \
             -e OBJECT_STORAGE_ACCESS_KEY_ID=ci-access-key \
             -e OBJECT_STORAGE_BUCKET=fluke-ci-private \
@@ -97,20 +217,22 @@ jobs:
             -e OBJECT_STORAGE_FORCE_PATH_STYLE=true \
             -e OBJECT_STORAGE_REGION=us-west-2 \
             -e OBJECT_STORAGE_SECRET_ACCESS_KEY=ci-secret-key \
+            -e APPLE_CLIENT_ID=app.fluke.Fluke \
+            -e APPLE_TEAM_ID=86RBV2JZ8F \
+            -e APPLE_KEY_ID=ABC123DEFG \
+            -e ENABLE_ACCOUNTS="$accounts" \
+            -e ENABLE_SUBMISSIONS="$submissions" \
+            -e ENABLE_IDENTIFY=false \
+            -e PRODUCTION_MUTATIONS_ACK="$acknowledgement" \
             fluke-api:ci
-          cleanup() {
-            exit_code=$?
-            if ((exit_code != 0)); then
-              docker logs fluke-api-ci || true
-            fi
-            docker rm --force fluke-api-ci >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
           for attempt in {1..30}; do
-            curl --fail --silent http://localhost:4000/api/v1/ready && exit 0
+            if curl --fail --silent http://localhost:4000/api/v1/ready >/dev/null; then break; fi
             if [[ "$(docker inspect --format '{{.State.Running}}' fluke-api-ci 2>/dev/null || true)" != true ]]; then
               exit 1
             fi
+            if (( attempt == 30 )); then exit 1; fi
             sleep 1
           done
-          exit 1
+          test "$(curl --fail --silent http://localhost:4000/api/v1/capabilities)" = "$expected"
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            -X POST http://localhost:4000/api/v1/identify)" = '404'
