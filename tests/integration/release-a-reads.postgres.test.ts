@@ -6,6 +6,7 @@ import {
   SightingPageSchema,
   WhaleTrackSchema,
 } from '../../src/contracts/index.js';
+import { boundedDatabaseRead } from '../../src/lib/bounded-database-read.js';
 
 const postgresEnabled = process.env.RUN_POSTGRES_INTEGRATION === 'true';
 const fixture = Object.freeze({
@@ -165,5 +166,41 @@ describe.runIf(postgresEnabled)('Release A reads against PostgreSQL', () => {
 
     expect(received).toHaveLength(expected.length);
     expect(new Set(received)).toEqual(new Set(expected));
+  });
+
+  it('cancels stalled PostgreSQL work and releases the single pool connection', async () => {
+    const { PrismaClient } = await import('@prisma/client');
+    const singleConnectionUrl = new URL(process.env.DATABASE_URL ?? '');
+    singleConnectionUrl.searchParams.set('connection_limit', '1');
+    singleConnectionUrl.searchParams.set('pool_timeout', '1');
+    const isolatedPrisma = new PrismaClient({ datasourceUrl: singleConnectionUrl.toString() });
+    const controller = new AbortController();
+    const startedAt = Date.now();
+    let markOperationStarted: (() => void) | undefined;
+    const operationStarted = new Promise<void>((resolve) => {
+      markOperationStarted = resolve;
+    });
+
+    try {
+      const stalledRead = boundedDatabaseRead(
+        isolatedPrisma,
+        (transaction) => {
+          markOperationStarted?.();
+          return transaction.$queryRaw`SELECT pg_sleep(5)`;
+        },
+        controller.signal,
+        75,
+      );
+      await operationStarted;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      controller.abort(new Error('integration client disconnected'));
+
+      await expect(stalledRead).rejects.toThrow('integration client disconnected');
+      expect(Date.now() - startedAt).toBeLessThan(1_000);
+      await expect(isolatedPrisma.$queryRaw`SELECT 1 AS value`).resolves.toEqual([{ value: 1 }]);
+      expect(Date.now() - startedAt).toBeLessThan(1_000);
+    } finally {
+      await isolatedPrisma.$disconnect();
+    }
   });
 });

@@ -14,6 +14,10 @@ import {
 } from '../contracts/index.js';
 import { prisma } from '../db.js';
 import {
+  boundedDatabaseRead,
+  type BoundedReadRouteOptions,
+} from '../lib/bounded-database-read.js';
+import {
   decodeCursor,
   encodeCursor,
   WhaleCursorSchema,
@@ -23,7 +27,6 @@ import {
   LIVE_READ_CACHE_POLICY,
   sendPublicResponse,
 } from '../lib/public-response.js';
-import { abortableRead } from '../lib/read-deadline.js';
 
 const MAX_TRACK_POINTS = 1_000;
 const MAX_TRACK_WINDOW_MS = 366 * 24 * 60 * 60 * 1_000;
@@ -102,7 +105,11 @@ function whaleBoundary(
   };
 }
 
-async function handleWhaleList(request: FastifyRequest, reply: FastifyReply) {
+async function handleWhaleList(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  statementTimeoutMs: number,
+) {
   const query = WhalesQuerySchema.safeParse(request.query);
   if (!query.success) {
     return reply.code(400).send({ error: 'Invalid query parameters' });
@@ -110,11 +117,12 @@ async function handleWhaleList(request: FastifyRequest, reply: FastifyReply) {
   const cursor = query.data.cursor
     ? decodeCursor(query.data.cursor, WhaleCursorSchema)
     : null;
-  const rows = await abortableRead(prisma.whale.findMany({
-    where: whaleBoundary(cursor),
-    take: query.data.limit + 1,
-    orderBy: [{ catalogId: 'asc' }, { id: 'asc' }],
-  }), request.signal);
+  const rows = await boundedDatabaseRead(prisma, (transaction) =>
+    transaction.whale.findMany({
+      where: whaleBoundary(cursor),
+      take: query.data.limit + 1,
+      orderBy: [{ catalogId: 'asc' }, { id: 'asc' }],
+    }), request.signal, statementTimeoutMs);
   const whales = rows.slice(0, query.data.limit);
   const last = whales.at(-1);
   const payload = {
@@ -134,8 +142,8 @@ async function handleWhaleList(request: FastifyRequest, reply: FastifyReply) {
   return sendPublicResponse(request, reply, WhalePageSchema, payload, CATALOG_CACHE_POLICY);
 }
 
-function findWhaleProfile(id: string) {
-  return prisma.whale.findUnique({
+function findWhaleProfile(transaction: Prisma.TransactionClient, id: string) {
+  return transaction.whale.findUnique({
     where: { id },
     include: {
       mother: { select: { catalogId: true, name: true } },
@@ -165,8 +173,13 @@ function findWhaleProfile(id: string) {
 
 type WhaleRequest = FastifyRequest<{ Params: { id: string } }>;
 
-async function handleWhaleProfile(request: WhaleRequest, reply: FastifyReply) {
-  const whale = await abortableRead(findWhaleProfile(request.params.id), request.signal);
+async function handleWhaleProfile(
+  request: WhaleRequest,
+  reply: FastifyReply,
+  statementTimeoutMs: number,
+) {
+  const whale = await boundedDatabaseRead(prisma, (transaction) =>
+    findWhaleProfile(transaction, request.params.id), request.signal, statementTimeoutMs);
   if (!whale) return reply.code(404).send({ error: 'Whale not found' });
 
   const dto: WhaleProfileDTO = {
@@ -185,6 +198,7 @@ async function handleWhaleProfile(request: WhaleRequest, reply: FastifyReply) {
 }
 
 function findTrackPoints(
+  transaction: Prisma.TransactionClient,
   whaleId: string,
   query: z.infer<typeof WhaleTrackQuerySchema>,
 ) {
@@ -192,7 +206,7 @@ function findTrackPoints(
     ...(query.from ? { gte: new Date(query.from) } : {}),
     ...(query.to ? { lte: new Date(query.to) } : {}),
   };
-  return prisma.sighting.findMany({
+  return transaction.sighting.findMany({
     where: {
       status: 'APPROVED',
       whales: { some: { whaleId } },
@@ -211,18 +225,40 @@ function findTrackPoints(
   });
 }
 
-async function handleWhaleTrack(request: WhaleRequest, reply: FastifyReply) {
+async function readWhaleTrack(
+  id: string,
+  query: z.infer<typeof WhaleTrackQuerySchema>,
+  signal: AbortSignal,
+  statementTimeoutMs: number,
+) {
+  return boundedDatabaseRead(prisma, async (transaction) => {
+    const whale = await transaction.whale.findUnique({
+      where: { id },
+      select: { catalogId: true, id: true },
+    });
+    if (!whale) return null;
+    const points = await findTrackPoints(transaction, whale.id, query);
+    return { points, whale };
+  }, signal, statementTimeoutMs);
+}
+
+async function handleWhaleTrack(
+  request: WhaleRequest,
+  reply: FastifyReply,
+  statementTimeoutMs: number,
+) {
   const query = WhaleTrackQuerySchema.safeParse(request.query);
   if (!query.success) {
     return reply.code(400).send({ error: 'Invalid query parameters' });
   }
-  const whale = await abortableRead(prisma.whale.findUnique({
-    where: { id: request.params.id },
-    select: { catalogId: true, id: true },
-  }), request.signal);
-  if (!whale) return reply.code(404).send({ error: 'Whale not found' });
-
-  const points = await abortableRead(findTrackPoints(whale.id, query.data), request.signal);
+  const track = await readWhaleTrack(
+    request.params.id,
+    query.data,
+    request.signal,
+    statementTimeoutMs,
+  );
+  if (!track) return reply.code(404).send({ error: 'Whale not found' });
+  const { points, whale } = track;
   const payload = {
     catalogId: whale.catalogId,
     points: points.map((point) => ({
@@ -238,10 +274,13 @@ async function handleWhaleTrack(request: WhaleRequest, reply: FastifyReply) {
   return sendPublicResponse(request, reply, WhaleTrackSchema, payload, LIVE_READ_CACHE_POLICY);
 }
 
-const whalesRoutes: FastifyPluginAsync = async (fastify) => {
-  fastify.get('/whales', handleWhaleList);
-  fastify.get<{ Params: { id: string } }>('/whales/:id', handleWhaleProfile);
-  fastify.get<{ Params: { id: string } }>('/whales/:id/track', handleWhaleTrack);
+const whalesRoutes: FastifyPluginAsync<BoundedReadRouteOptions> = async (fastify, options) => {
+  fastify.get('/whales', (request, reply) =>
+    handleWhaleList(request, reply, options.statementTimeoutMs));
+  fastify.get<{ Params: { id: string } }>('/whales/:id', (request, reply) =>
+    handleWhaleProfile(request, reply, options.statementTimeoutMs));
+  fastify.get<{ Params: { id: string } }>('/whales/:id/track', (request, reply) =>
+    handleWhaleTrack(request, reply, options.statementTimeoutMs));
 };
 
 export default whalesRoutes;

@@ -8,6 +8,10 @@ import {
 } from '../contracts/index.js';
 import { prisma } from '../db.js';
 import {
+  boundedDatabaseRead,
+  type BoundedReadRouteOptions,
+} from '../lib/bounded-database-read.js';
+import {
   decodeCursor,
   encodeCursor,
   HistoricalSightingCursorSchema,
@@ -18,11 +22,8 @@ import {
   CATALOG_CACHE_POLICY,
   sendPublicResponse,
 } from '../lib/public-response.js';
-import { abortableRead } from '../lib/read-deadline.js';
 
 const DEFAULT_WINDOW_MS = 366 * 24 * 60 * 60 * 1_000;
-const TRANSACTION_MAX_WAIT_MS = 1_000;
-const TRANSACTION_TIMEOUT_MS = 4_000;
 
 interface HistoricalCandidate {
   readonly dto: HistoricalSighting;
@@ -176,32 +177,33 @@ function historicalWhere(read: HistoricalRead) {
   };
 }
 
-async function fetchCandidates(read: HistoricalRead, signal: AbortSignal) {
+async function fetchCandidates(
+  read: HistoricalRead,
+  signal: AbortSignal,
+  statementTimeoutMs: number,
+) {
   const where = historicalWhere(read);
   const take = read.limit + 1;
-  const operation = prisma.$transaction(async (transaction) => Promise.all([
-    transaction.sighting.findMany({
-      where: where.internal,
-      orderBy: [{ observedAt: 'asc' }, { id: 'asc' }],
-      take,
-      select: {
-        ecotypeGuess: true, id: true, latitude: true, locationName: true,
-        longitude: true, observedAt: true, whales: { select: { whaleId: true } },
-      },
-    }),
-    transaction.externalSighting.findMany({
-      where: where.external,
-      orderBy: [{ observedAt: 'asc' }, { id: 'asc' }],
-      take,
-      select: {
-        ecotypeGuess: true, id: true, latitude: true, longitude: true, observedAt: true,
-      },
-    }),
-  ]), {
-    maxWait: TRANSACTION_MAX_WAIT_MS,
-    timeout: TRANSACTION_TIMEOUT_MS,
-  });
-  const [internalRows, externalRows] = await abortableRead(operation, signal);
+  const [internalRows, externalRows] = await boundedDatabaseRead(prisma, (transaction) =>
+    Promise.all([
+      transaction.sighting.findMany({
+        where: where.internal,
+        orderBy: [{ observedAt: 'asc' }, { id: 'asc' }],
+        take,
+        select: {
+          ecotypeGuess: true, id: true, latitude: true, locationName: true,
+          longitude: true, observedAt: true, whales: { select: { whaleId: true } },
+        },
+      }),
+      transaction.externalSighting.findMany({
+        where: where.external,
+        orderBy: [{ observedAt: 'asc' }, { id: 'asc' }],
+        take,
+        select: {
+          ecotypeGuess: true, id: true, latitude: true, longitude: true, observedAt: true,
+        },
+      }),
+    ]), signal, statementTimeoutMs);
   return [
     ...internalRows.map(toInternalCandidate),
     ...externalRows.map(toExternalCandidate),
@@ -240,9 +242,13 @@ function historicalPage(candidates: readonly HistoricalCandidate[], read: Histor
   };
 }
 
-async function handleHistoricalSightings(request: FastifyRequest, reply: FastifyReply) {
+async function handleHistoricalSightings(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  statementTimeoutMs: number,
+) {
   const read = resolveRead(request.query);
-  const candidates = await fetchCandidates(read, request.signal);
+  const candidates = await fetchCandidates(read, request.signal, statementTimeoutMs);
   return sendPublicResponse(
     request,
     reply,
@@ -252,8 +258,12 @@ async function handleHistoricalSightings(request: FastifyRequest, reply: Fastify
   );
 }
 
-const historicalSightingsRoutes: FastifyPluginAsync = async (fastify) => {
-  fastify.get('/sightings/historical', handleHistoricalSightings);
+const historicalSightingsRoutes: FastifyPluginAsync<BoundedReadRouteOptions> = async (
+  fastify,
+  options,
+) => {
+  fastify.get('/sightings/historical', (request, reply) =>
+    handleHistoricalSightings(request, reply, options.statementTimeoutMs));
 };
 
 export default historicalSightingsRoutes;

@@ -3,14 +3,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SafeErrorSchema } from '../src/contracts/index.js';
 import type { BuildAppOptions } from '../src/app.js';
 
-vi.mock('../src/db.js', () => ({
-  prisma: {
+vi.mock('../src/db.js', () => {
+  const transaction = {
+    $queryRaw: vi.fn().mockResolvedValue([{ set_config: '5000ms' }]),
     externalSighting: { findMany: vi.fn() },
     predictionGrid: { findUnique: vi.fn() },
     sighting: { findMany: vi.fn() },
     whale: { findMany: vi.fn(), findUnique: vi.fn() },
-  },
-}));
+  };
+  return {
+    prisma: {
+      ...transaction,
+      $transaction: vi.fn(async (callback: (client: typeof transaction) => unknown) =>
+        callback(transaction)),
+    },
+  };
+});
 
 const { prisma } = await import('../src/db.js');
 const { buildApp } = await import('../src/app.js');

@@ -2,8 +2,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import type { FastifyInstance } from 'fastify';
 import { SafeErrorSchema, SightingPageSchema } from '../contracts/index.js';
 
-vi.mock('../db.js', () => ({
-  prisma: {
+vi.mock('../db.js', () => {
+  const transaction = {
+    $queryRaw: vi.fn().mockResolvedValue([{ set_config: '5000ms' }]),
     whale: {
       findMany: vi.fn(),
       findUnique: vi.fn(),
@@ -16,8 +17,15 @@ vi.mock('../db.js', () => ({
     },
     sightingWhale: { upsert: vi.fn() },
     auditLog: { create: vi.fn() },
-  },
-}));
+  };
+  return {
+    prisma: {
+      ...transaction,
+      $transaction: vi.fn(async (callback: (client: typeof transaction) => unknown) =>
+        callback(transaction)),
+    },
+  };
+});
 
 const { prisma } = await import('../db.js');
 const { buildApp } = await import('../app.js');

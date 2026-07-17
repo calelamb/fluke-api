@@ -17,6 +17,7 @@ import {
   validateFeatureConfig,
   type FeatureConfig,
 } from './features.js';
+import { boundedDatabaseRead } from './lib/bounded-database-read.js';
 import { resolveUploadsDir } from './lib/storage.js';
 import { resolveRequestId } from './lib/request-id.js';
 import { classifyError, classifyStatus } from './lib/safe-errors.js';
@@ -72,19 +73,12 @@ function isCanonicalSerializedError(payload: unknown, requestId: string): boolea
 }
 
 async function defaultReadinessProbe(): Promise<void> {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<never>((_resolve, reject) => {
-    timeout = setTimeout(() => reject(new Error('Database readiness probe timed out')), READINESS_TIMEOUT_MS);
-    timeout.unref();
-  });
-
-  try {
-    await Promise.race([prisma.$queryRaw`SELECT 1`, timeoutPromise]);
-  } finally {
-    if (timeout !== undefined) {
-      clearTimeout(timeout);
-    }
-  }
+  await boundedDatabaseRead(
+    prisma,
+    (transaction) => transaction.$queryRaw`SELECT 1`,
+    AbortSignal.timeout(READINESS_TIMEOUT_MS),
+    READINESS_TIMEOUT_MS,
+  );
 }
 
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
@@ -262,11 +256,15 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     prefix: '/api/v1',
     features: resolvedOptions.features,
   });
-  await app.register(whalesRoutes, { prefix: '/api/v1' });
-  await app.register(sightingsRoutes, { prefix: '/api/v1' });
-  await app.register(historicalSightingsRoutes, { prefix: '/api/v1' });
-  await app.register(externalSightingsRoutes, { prefix: '/api/v1' });
-  await app.register(predictRoutes, { prefix: '/api/v1' });
+  const boundedReadOptions = Object.freeze({
+    prefix: '/api/v1',
+    statementTimeoutMs: resolvedOptions.publicReadTimeoutMs,
+  });
+  await app.register(whalesRoutes, boundedReadOptions);
+  await app.register(sightingsRoutes, boundedReadOptions);
+  await app.register(historicalSightingsRoutes, boundedReadOptions);
+  await app.register(externalSightingsRoutes, boundedReadOptions);
+  await app.register(predictRoutes, boundedReadOptions);
   if (resolvedOptions.features.submissions) {
     await app.register(sightingSubmissionRoutes, { prefix: '/api/v1' });
   }

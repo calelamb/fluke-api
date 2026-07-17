@@ -7,6 +7,10 @@ import {
 } from '../contracts/index.js';
 import { prisma } from '../db.js';
 import {
+  boundedDatabaseRead,
+  type BoundedReadRouteOptions,
+} from '../lib/bounded-database-read.js';
+import {
   decodeCursor,
   encodeCursor,
   ExternalSightingCursorSchema,
@@ -17,7 +21,6 @@ import {
   LIVE_READ_CACHE_POLICY,
   sendPublicResponse,
 } from '../lib/public-response.js';
-import { abortableRead } from '../lib/read-deadline.js';
 
 type ExternalRow = Prisma.ExternalSightingGetPayload<Record<string, never>>;
 
@@ -126,13 +129,18 @@ function externalPage(rows: readonly ExternalRow[], read: ExternalRead) {
   };
 }
 
-async function handleExternalSightings(request: FastifyRequest, reply: FastifyReply) {
+async function handleExternalSightings(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  statementTimeoutMs: number,
+) {
   const read = resolveRead(request.query);
-  const rows = await abortableRead(prisma.externalSighting.findMany({
-    where: externalWhere(read),
-    orderBy: [{ observedAt: 'desc' }, { id: 'desc' }],
-    take: read.limit + 1,
-  }), request.signal);
+  const rows = await boundedDatabaseRead(prisma, (transaction) =>
+    transaction.externalSighting.findMany({
+      where: externalWhere(read),
+      orderBy: [{ observedAt: 'desc' }, { id: 'desc' }],
+      take: read.limit + 1,
+    }), request.signal, statementTimeoutMs);
   return sendPublicResponse(
     request,
     reply,
@@ -142,8 +150,12 @@ async function handleExternalSightings(request: FastifyRequest, reply: FastifyRe
   );
 }
 
-const externalSightingsRoutes: FastifyPluginAsync = async (fastify) => {
-  fastify.get('/external-sightings', handleExternalSightings);
+const externalSightingsRoutes: FastifyPluginAsync<BoundedReadRouteOptions> = async (
+  fastify,
+  options,
+) => {
+  fastify.get('/external-sightings', (request, reply) =>
+    handleExternalSightings(request, reply, options.statementTimeoutMs));
 };
 
 export default externalSightingsRoutes;

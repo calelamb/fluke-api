@@ -9,6 +9,10 @@ import {
 } from '../contracts/index.js';
 import { prisma } from '../db.js';
 import {
+  boundedDatabaseRead,
+  type BoundedReadRouteOptions,
+} from '../lib/bounded-database-read.js';
+import {
   decodeCursor,
   encodeCursor,
   SightingCursorSchema,
@@ -17,7 +21,6 @@ import {
   LIVE_READ_CACHE_POLICY,
   sendPublicResponse,
 } from '../lib/public-response.js';
-import { abortableRead } from '../lib/read-deadline.js';
 
 function toSightingDTO(sighting: {
   id: string;
@@ -83,7 +86,11 @@ function sightingBoundary(
   };
 }
 
-async function handleSightings(request: FastifyRequest, reply: FastifyReply) {
+async function handleSightings(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  statementTimeoutMs: number,
+) {
   const query = SightingsQuerySchema.safeParse(request.query);
   if (!query.success) {
     return reply.code(400).send({ error: 'Invalid query parameters' });
@@ -91,12 +98,13 @@ async function handleSightings(request: FastifyRequest, reply: FastifyReply) {
   const cursor = query.data.cursor
     ? decodeCursor(query.data.cursor, SightingCursorSchema)
     : null;
-  const rows = await abortableRead(prisma.sighting.findMany({
-    where: sightingBoundary(cursor),
-    take: query.data.limit + 1,
-    orderBy: [{ observedAt: 'desc' }, { id: 'desc' }],
-    include: { photos: true, whales: { include: { whale: true } } },
-  }), request.signal);
+  const rows = await boundedDatabaseRead(prisma, (transaction) =>
+    transaction.sighting.findMany({
+      where: sightingBoundary(cursor),
+      take: query.data.limit + 1,
+      orderBy: [{ observedAt: 'desc' }, { id: 'desc' }],
+      include: { photos: true, whales: { include: { whale: true } } },
+    }), request.signal, statementTimeoutMs);
   const sightings = rows.slice(0, query.data.limit);
   const last = sightings.at(-1);
   const payload = {
@@ -116,8 +124,9 @@ async function handleSightings(request: FastifyRequest, reply: FastifyReply) {
   return sendPublicResponse(request, reply, SightingPageSchema, payload, LIVE_READ_CACHE_POLICY);
 }
 
-const sightingsRoutes: FastifyPluginAsync = async (fastify) => {
-  fastify.get('/sightings', handleSightings);
+const sightingsRoutes: FastifyPluginAsync<BoundedReadRouteOptions> = async (fastify, options) => {
+  fastify.get('/sightings', (request, reply) =>
+    handleSightings(request, reply, options.statementTimeoutMs));
 };
 
 export default sightingsRoutes;

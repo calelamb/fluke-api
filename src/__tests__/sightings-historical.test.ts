@@ -8,6 +8,7 @@ import { encodeCursor } from '../lib/cursor.js';
 
 vi.mock('../db.js', () => {
   const transactionClient = {
+    $queryRaw: vi.fn().mockResolvedValue([{ set_config: '5000ms' }]),
     externalSighting: { findMany: vi.fn() },
     sighting: { findMany: vi.fn() },
   };

@@ -3,13 +3,21 @@ import type { FastifyInstance } from 'fastify';
 import type { Prisma } from '@prisma/client';
 import { PredictionSchema, SafeErrorSchema } from '../contracts/index.js';
 
-vi.mock('../db.js', () => ({
-  prisma: {
+vi.mock('../db.js', () => {
+  const transaction = {
+    $queryRaw: vi.fn().mockResolvedValue([{ set_config: '5000ms' }]),
     predictionGrid: {
       findUnique: vi.fn(),
     },
-  },
-}));
+  };
+  return {
+    prisma: {
+      ...transaction,
+      $transaction: vi.fn(async (callback: (client: typeof transaction) => unknown) =>
+        callback(transaction)),
+    },
+  };
+});
 
 const { prisma } = await import('../db.js');
 const { buildApp } = await import('../app.js');
@@ -44,6 +52,23 @@ describe('GET /api/v1/predict', () => {
       url: '/api/v1/predict?whaleId=wh_test&horizon=10y',
     });
     expect(res.statusCode).toBe(400);
+  });
+
+  it('rejects an unknown pod with the canonical validation envelope', async () => {
+    const response = await app.inject({
+      headers: { 'x-request-id': 'invalid-pod-request' },
+      method: 'GET',
+      url: '/api/v1/predict?pod=Q&horizon=24h',
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(SafeErrorSchema.parse(response.json())).toEqual({
+      code: 'VALIDATION_ERROR',
+      message: 'The request is invalid.',
+      requestId: 'invalid-pod-request',
+      retryable: false,
+    });
+    expect(prisma.predictionGrid.findUnique).not.toHaveBeenCalled();
   });
 
   it('returns 404 when no prediction has been computed for the subject', async () => {
@@ -85,6 +110,8 @@ describe('GET /api/v1/predict', () => {
     expect(typeof body.computedAt).toBe('string');
     expect(res.headers.etag).toMatch(/^W\/"[A-Za-z0-9_-]+"$/u);
     expect(res.headers['cache-control']).toContain('public');
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+    expect(prisma.$queryRaw).toHaveBeenCalledOnce();
   });
 
   it('fails closed when stored prediction output violates the contract', async () => {
@@ -106,7 +133,7 @@ describe('GET /api/v1/predict', () => {
 
     expect(response.statusCode).toBe(500);
     expect(SafeErrorSchema.parse(response.json()).code).toBe('INTERNAL_ERROR');
-    expect(response.body).not.toContain('91');
+    expect(response.body).not.toContain('"lat":91');
   });
 
   it('bounds a stalled database read with the canonical retryable response', async () => {
