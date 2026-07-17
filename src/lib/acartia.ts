@@ -9,6 +9,7 @@
 // License: Creative Commons; honor attribution per data_source_entity.
 
 import { z } from 'zod';
+import { fetchJsonWithRetry } from '../jobs/provider-client.js';
 
 const ACARTIA_CURRENT_URL = 'https://acartia.io/api/v1/sightings/current';
 
@@ -153,7 +154,9 @@ export function normalizeAcartiaSighting(
 }
 
 export interface FetchOptions {
+  fetchImpl?: typeof fetch;
   signal?: AbortSignal;
+  sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   url?: string;
 }
 
@@ -166,18 +169,17 @@ export async function fetchAcartiaCurrent(
   options: FetchOptions = {},
 ): Promise<NormalizedExternalSighting[]> {
   const url = options.url ?? ACARTIA_CURRENT_URL;
-  const response = await fetch(url, {
+  const json = await fetchJsonWithRetry(url, {
+    attemptTimeoutMs: 10_000,
+    fetchImpl: options.fetchImpl,
     signal: options.signal,
-    headers: { Accept: 'application/json' },
+    sleep: options.sleep,
   });
-
-  if (!response.ok) {
-    throw new Error(`Acartia request failed: ${response.status} ${response.statusText}`);
-  }
-
-  const json: unknown = await response.json();
   if (!Array.isArray(json)) {
-    throw new Error(`Acartia returned a non-array payload (${typeof json})`);
+    throw new Error('Acartia returned an invalid payload');
+  }
+  if (json.length > 10_000) {
+    throw new Error('Acartia returned too many records');
   }
 
   const out: NormalizedExternalSighting[] = [];

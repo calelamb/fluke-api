@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeAcartiaSighting, type AcartiaSighting } from '../lib/acartia.js';
+import { vi } from 'vitest';
+import {
+  fetchAcartiaCurrent,
+  normalizeAcartiaSighting,
+  type AcartiaSighting,
+} from '../lib/acartia.js';
 
 const baseRaw: AcartiaSighting = {
   ssemmi_id: 'SPOTTER 1',
@@ -95,5 +100,24 @@ describe('normalizeAcartiaSighting', () => {
     expect(normalizeAcartiaSighting({ ...baseRaw, trusted: 1 })?.trusted).toBe(true);
     expect(normalizeAcartiaSighting({ ...baseRaw, trusted: true })?.trusted).toBe(true);
     expect(normalizeAcartiaSighting({ ...baseRaw, trusted: false })?.trusted).toBe(false);
+  });
+});
+
+describe('fetchAcartiaCurrent', () => {
+  it('uses the bounded provider retry policy before normalizing data', async () => {
+    const responses = [
+      new Response('{}', { status: 503 }),
+      new Response(JSON.stringify([baseRaw]), { status: 200 }),
+    ];
+    const fetchImpl = vi.fn(async () => responses.shift() ?? new Response('{}', { status: 500 }));
+
+    const result = await fetchAcartiaCurrent({
+      fetchImpl,
+      sleep: async () => undefined,
+      url: 'https://provider.example/current',
+    });
+
+    expect(result).toHaveLength(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 });
