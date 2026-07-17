@@ -1,5 +1,5 @@
 import type { Prisma, User } from '@prisma/client';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyBaseLogger, FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   AuthAppleRequestSchema,
@@ -188,12 +188,18 @@ async function verifyAppleRequest(
   }
 }
 
-function reportCleanupFailure(request: FastifyRequest, failure: CleanupFailure): void {
-  request.log.error({
-    attempts: failure.attempts,
+export function logCleanupFailure(
+  logger: Pick<FastifyBaseLogger, 'error'>,
+  requestId: string,
+  failure: CleanupFailure,
+): void {
+  const attempts = Number.isInteger(failure.attempts)
+    ? Math.min(Math.max(failure.attempts, 0), 5)
+    : 0;
+  logger.error({
+    attempts,
     failureKind: 'storage-cleanup',
-    requestId: request.id,
-    storageKey: failure.storageKey,
+    requestId,
   }, 'account object cleanup failed');
 }
 
@@ -305,7 +311,7 @@ export default async function observerAuthRoutes(
       userId: request.observer.id,
     }, {
       appleAuth: options.appleAuth,
-      recordCleanupFailure: (failure) => reportCleanupFailure(request, failure),
+      recordCleanupFailure: (failure) => logCleanupFailure(request.log, request.id, failure),
       storage: options.storage,
       tokenCrypto: options.tokenCrypto,
     });

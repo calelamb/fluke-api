@@ -22,6 +22,7 @@ vi.mock('../db.js', () => ({
 
 const { prisma } = await import('../db.js');
 const { buildApp } = await import('../app.js');
+const { logCleanupFailure } = await import('../routes/observer-auth.js');
 
 const appleAuth = Object.freeze({
   exchangeAppleAuthorizationCode: vi.fn(),
@@ -427,5 +428,29 @@ describe('observer account routes', () => {
     expect(appleAuth.revokeAppleRefreshToken).toHaveBeenCalled();
     expect(prisma.user.delete).toHaveBeenCalled();
     expect(String(response.headers['set-cookie'])).toContain('fluke_observer=;');
+  });
+});
+
+describe('observer cleanup diagnostics', () => {
+  it('logs only bounded non-sensitive cleanup fields', () => {
+    const error = vi.fn();
+    const privateStorageKey = 'observers/private-user/sighting-secret.webp';
+    const privateFailureText = 'observer@example.com refresh-token-value';
+
+    logCleanupFailure({ error }, 'request-safe-1', {
+      attempts: 3,
+      error: new Error(privateFailureText),
+      storageKey: privateStorageKey,
+    });
+
+    const serializedLogs = JSON.stringify(error.mock.calls);
+    expect(error).toHaveBeenCalledWith({
+      attempts: 3,
+      failureKind: 'storage-cleanup',
+      requestId: 'request-safe-1',
+    }, 'account object cleanup failed');
+    expect(serializedLogs).not.toContain(privateStorageKey);
+    expect(serializedLogs).not.toContain('observer@example.com');
+    expect(serializedLogs).not.toContain('refresh-token-value');
   });
 });

@@ -101,3 +101,17 @@ git diff --check
 - No Task 5 functional blocker.
 - The local runtime is Node `v25.9.0`, while the repository pins Node `22.17.0`; pnpm emitted the existing engine warning. All checks above completed successfully.
 - Production Apple keys/configuration and composition remain intentionally deferred to Task 8, as specified by the plan. This task adds only the injected route composition seam and does not contact Apple.
+
+## Review Follow-up: Private Cleanup Diagnostics
+
+Commit follow-up removes the private `storageKey` from cleanup-failure logs. The diagnostic boundary now emits only the canonical message plus `requestId`, `failureKind`, and a numeric attempt count bounded to `0...5`. It intentionally does not emit the cleanup error, storage key, a key hash, observer PII, or credentials.
+
+TDD evidence:
+
+- RED: the new logger-spy test failed because the safe diagnostic helper did not exist.
+- GREEN: `src/__tests__/observer-routes.test.ts` passed 15/15 and the focused Task 5 set passed 41/41.
+- The spy serializes every logger argument and asserts that the private storage key, email, and token-like text are absent while the safe fields remain present.
+
+## Cross-task Launch Gate (Not an API Task 5 Defect)
+
+The current iOS client and the canonical API contract are not yet interoperable. The iOS client sends only `identityToken` and `fullName`, decodes a bare user, assumes non-null email, sends no fresh Apple credential body for deletion, and uses no CSRF response token. Task 5 correctly follows the locked API contract, which requires `authorizationCode` and `nonce`, returns `{ csrfToken, user }`, permits absent Apple email, and requires fresh Apple reauthentication for account deletion. This mismatch must be resolved in the iOS integration task before launch; it was intentionally not papered over in the API.
