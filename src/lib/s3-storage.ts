@@ -106,6 +106,30 @@ export function parseS3StorageConfig(input: unknown): S3StorageConfig {
   return Object.freeze(s3StorageConfigSchema.parse(input));
 }
 
+export function createS3CompatibleClient(
+  input: S3StorageConfig,
+  resolver: EndpointResolver = defaultEndpointResolver,
+): S3Client {
+  const config = parseS3StorageConfig(input);
+  return new S3Client({
+    credentials: {
+      accessKeyId: config.accessKeyId,
+      secretAccessKey: config.secretAccessKey,
+    },
+    endpoint: config.endpoint,
+    forcePathStyle: config.forcePathStyle,
+    region: config.region,
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
+    requestHandler: new NodeHttpHandler({
+      httpsAgent: new Agent({
+        keepAlive: true,
+        lookup: createPinnedLookup(resolver) as LookupFunction,
+      }),
+    }),
+  });
+}
+
 async function boundedBody(body: Buffer | Readable): Promise<Buffer> {
   if (Buffer.isBuffer(body)) {
     if (body.byteLength === 0 || body.byteLength > MAX_OBJECT_BYTES) {
@@ -141,21 +165,7 @@ export class S3StorageBackend implements StorageBackend {
 
   constructor(config: S3StorageConfig, client?: S3Client) {
     this.#config = parseS3StorageConfig(config);
-    this.#client = client ?? new S3Client({
-      credentials: {
-        accessKeyId: this.#config.accessKeyId,
-        secretAccessKey: this.#config.secretAccessKey,
-      },
-      endpoint: this.#config.endpoint,
-      forcePathStyle: this.#config.forcePathStyle,
-      region: this.#config.region,
-      requestHandler: new NodeHttpHandler({
-        httpsAgent: new Agent({
-          keepAlive: true,
-          lookup: createPinnedLookup() as LookupFunction,
-        }),
-      }),
-    });
+    this.#client = client ?? createS3CompatibleClient(this.#config);
   }
 
   async put(input: {

@@ -108,6 +108,8 @@ describe.runIf(process.env.RUN_S3_INTEGRATION === 'true')('private S3 integratio
       endpoint,
       forcePathStyle: true,
       region: 'us-west-2',
+      requestChecksumCalculation: 'WHEN_REQUIRED',
+      responseChecksumValidation: 'WHEN_REQUIRED',
     });
     const storage = new S3StorageBackend({
       ...credentials,

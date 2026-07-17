@@ -14,6 +14,7 @@ const {
   S3StorageBackend,
   StorageUnavailableError,
   assertPublicEndpointResolution,
+  createS3CompatibleClient,
   createPinnedLookup,
   parseS3StorageConfig,
 } = await import('../lib/s3-storage.js');
@@ -25,6 +26,18 @@ const CONFIG = Object.freeze({
   forcePathStyle: true,
   region: 'us-west-2',
   secretAccessKey: 'secret-access-key',
+});
+
+describe('createS3CompatibleClient', () => {
+  it('limits automatic checksum behavior to operations that require it', async () => {
+    const client = createS3CompatibleClient(CONFIG);
+    try {
+      await expect(client.config.requestChecksumCalculation()).resolves.toBe('WHEN_REQUIRED');
+      await expect(client.config.responseChecksumValidation()).resolves.toBe('WHEN_REQUIRED');
+    } finally {
+      client.destroy();
+    }
+  });
 });
 
 function buildStorage(send = vi.fn().mockResolvedValue({})): {
