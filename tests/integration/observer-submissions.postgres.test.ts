@@ -22,9 +22,15 @@ function readRepositoryFile(relativePath: string): string {
 }
 
 function deployMigrations(schemaPath: string, databaseUrl: string): void {
+  const migrationUrl = new URL(databaseUrl);
+  migrationUrl.searchParams.delete('options');
   execFileSync('pnpm', ['exec', 'prisma', 'migrate', 'deploy', '--schema', schemaPath], {
     cwd: repositoryRoot,
-    env: { ...process.env, DATABASE_URL: databaseUrl, DIRECT_URL: databaseUrl },
+    env: {
+      ...process.env,
+      DATABASE_URL: migrationUrl.toString(),
+      DIRECT_URL: migrationUrl.toString(),
+    },
     stdio: 'pipe',
   });
 }
@@ -233,6 +239,50 @@ describe.runIf(postgresEnabled)('observer submissions against PostgreSQL', () =>
     ).rejects.toMatchObject({ code: 'P2002' });
   });
 
+  it('returns one durable sighting across concurrent response-loss replays', async () => {
+    const clientSubmissionId = '9c543e0e-1417-4fdc-9c4d-9727cbb06bd4';
+    const observerEmail = `replay-${process.pid}@example.invalid`;
+    const { buildApp } = await import('../../src/app.js');
+    const app = await buildApp({
+      features: Object.freeze({ accounts: false, identification: false, submissions: true }),
+      silent: true,
+    });
+    await app.ready();
+    try {
+      const payload = {
+        clientSubmissionId,
+        latitude: 48.5,
+        longitude: -123,
+        observedAt: '2026-07-17T12:00:00.000Z',
+        observerEmail,
+      };
+      const responses = await Promise.all([0, 1].map((attempt) => app.inject({
+        headers: { 'idempotency-key': clientSubmissionId },
+        method: 'POST',
+        payload,
+        remoteAddress: `127.0.1.${attempt + 1}`,
+        url: '/api/v1/sightings',
+      })));
+
+      expect(responses.map(({ statusCode }) => statusCode).sort()).toEqual([200, 201]);
+      const ids = responses.map((response) => response.json<{ id: string }>().id);
+      expect(new Set(ids).size).toBe(1);
+      await expect(prisma.sighting.count({ where: { observerEmail } })).resolves.toBe(1);
+
+      const changedOwner = await app.inject({
+        headers: { 'idempotency-key': clientSubmissionId },
+        method: 'POST',
+        payload: { ...payload, observerEmail: `changed-${observerEmail}` },
+        remoteAddress: '127.0.1.3',
+        url: '/api/v1/sightings',
+      });
+      expect(changedOwner.statusCode).toBe(409);
+    } finally {
+      await prisma.sighting.deleteMany({ where: { observerEmail } });
+      await app.close();
+    }
+  });
+
   it('keeps a sighting when its observer is deleted', async () => {
     await prisma.submissionIdempotency.deleteMany({ where: { id: fixture.idempotencyId } });
     await prisma.user.delete({ where: { id: fixture.userId } });
@@ -295,12 +345,15 @@ describe.runIf(postgresEnabled)('observer submissions against PostgreSQL', () =>
     const schemaName = `task2_upgrade_${process.pid}_${Date.now()}`;
     const stagedUrl = new URL(baseUrl);
     stagedUrl.searchParams.set('schema', schemaName);
+    stagedUrl.searchParams.set('options', `-csearch_path=${schemaName}`);
     const temporaryRoot = mkdtempSync(join(tmpdir(), 'fluke-task2-upgrade-'));
     const cleanupUrl = new URL(baseUrl);
     cleanupUrl.searchParams.set('schema', 'public');
+    cleanupUrl.searchParams.set('options', '-csearch_path=public');
     const cleanupClient = new PrismaClient({ datasourceUrl: cleanupUrl.toString() });
 
     try {
+      await cleanupClient.$executeRawUnsafe(`CREATE SCHEMA "${schemaName}"`);
       const { migrationsDirectory, schemaPath } = prepareStagedMigrationDirectory(temporaryRoot);
       deployMigrations(schemaPath, stagedUrl.toString());
       await seedLegacyRows(stagedUrl.toString());

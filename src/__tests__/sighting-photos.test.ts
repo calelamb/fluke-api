@@ -7,8 +7,9 @@ import sharp from 'sharp';
 import FormData from 'form-data';
 import type { StorageBackend } from '../lib/storage.js';
 
-vi.mock('../db.js', () => ({
-  prisma: {
+vi.mock('../db.js', () => {
+  const database = {
+    $executeRaw: vi.fn(),
     user: { findUnique: vi.fn() },
     whale: { findMany: vi.fn(), findUnique: vi.fn() },
     sighting: {
@@ -25,8 +26,14 @@ vi.mock('../db.js', () => ({
     },
     sightingWhale: { upsert: vi.fn() },
     auditLog: { create: vi.fn() },
-  },
-}));
+  };
+  return {
+    prisma: {
+      ...database,
+      $transaction: vi.fn(async (callback: (client: typeof database) => unknown) => callback(database)),
+    },
+  };
+});
 
 const { prisma } = await import('../db.js');
 
@@ -104,6 +111,78 @@ describe('POST /api/v1/sightings/:id/photos', () => {
   });
 
   describe('photo-upload token (offline replay)', () => {
+    it('replays a stable per-photo idempotency key without creating a duplicate', async () => {
+      const clientSubmissionId = 'e0f59404-ded3-4a07-8b3e-247ec89adcf7';
+      const photoSubmissionId = '3c2cb2b4-f5a8-4cd0-bd29-d1cd22632887';
+      const idempotencyKey = `${clientSubmissionId}:${photoSubmissionId}`;
+      vi.mocked(prisma.sighting.findUnique).mockResolvedValue(recentPendingSighting() as never);
+      vi.mocked(prisma.sightingPhoto.count).mockResolvedValue(0);
+      vi.mocked(prisma.sightingPhoto.findUnique).mockResolvedValue(null);
+      vi.mocked(prisma.sightingPhoto.create).mockResolvedValue({
+        id: 'stable-photo-id', orderIndex: 0, sightingId: 's1',
+        storageKey: 'placeholder', thumbnailUrl: 'stable-thumbnail', url: 'stable-url',
+      } as never);
+      const token = app.jwt.sign(
+        { clientSubmissionId, sightingId: 's1', type: 'photo-upload' },
+        { expiresIn: '24h' },
+      );
+      const png = await buildPng();
+
+      const firstForm = new FormData();
+      firstForm.append('file', png, { filename: 'orca.png', contentType: 'image/png' });
+      const first = await app.inject({
+        headers: {
+          ...firstForm.getHeaders(),
+          'idempotency-key': idempotencyKey,
+          'x-photo-upload-token': token,
+        },
+        method: 'POST', payload: firstForm, url: '/api/v1/sightings/s1/photos',
+      });
+      expect(first.statusCode).toBe(201);
+      const created = first.json<{ id: string; orderIndex: number; thumbnailUrl: string; url: string }>();
+      const createData = vi.mocked(prisma.sightingPhoto.create).mock.calls[0][0].data;
+      vi.mocked(prisma.sightingPhoto.findUnique).mockResolvedValue({
+        ...created, sightingId: 's1', storageKey: createData.storageKey,
+      } as never);
+
+      const replayForm = new FormData();
+      replayForm.append('file', png, { filename: 'renamed.png', contentType: 'image/png' });
+      const replay = await app.inject({
+        headers: {
+          ...replayForm.getHeaders(),
+          'idempotency-key': idempotencyKey,
+          'x-photo-upload-token': token,
+        },
+        method: 'POST', payload: replayForm, url: '/api/v1/sightings/s1/photos',
+      });
+
+      expect(replay.statusCode).toBe(200);
+      expect(replay.json()).toEqual(created);
+      expect(prisma.sightingPhoto.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects a photo key that is not scoped to the token submission', async () => {
+      const token = app.jwt.sign({
+        clientSubmissionId: 'e0f59404-ded3-4a07-8b3e-247ec89adcf7',
+        sightingId: 's1', type: 'photo-upload',
+      }, { expiresIn: '24h' });
+      vi.mocked(prisma.sighting.findUnique).mockResolvedValue(recentPendingSighting() as never);
+      const form = new FormData();
+      form.append('file', await buildPng(), { filename: 'orca.png', contentType: 'image/png' });
+
+      const response = await app.inject({
+        headers: {
+          ...form.getHeaders(),
+          'idempotency-key': '6456556d-60f6-460f-a90d-8567eb2c4cde:3c2cb2b4-f5a8-4cd0-bd29-d1cd22632887',
+          'x-photo-upload-token': token,
+        },
+        method: 'POST', payload: form, url: '/api/v1/sightings/s1/photos',
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(prisma.sightingPhoto.create).not.toHaveBeenCalled();
+    });
+
     it('allows public upload past the 30-min window when a valid token is supplied', async () => {
       vi.mocked(prisma.sighting.findUnique).mockResolvedValue(
         recentPendingSighting({

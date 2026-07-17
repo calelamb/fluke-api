@@ -31,6 +31,7 @@ import {
 import adminRoutes from './routes/admin.js';
 import authRoutes from './routes/auth.js';
 import observerAuthRoutes from './routes/observer-auth.js';
+import observerSightingsRoutes from './routes/observer-sightings.js';
 import capabilitiesRoutes from './routes/capabilities.js';
 import externalSightingsRoutes from './routes/external-sightings.js';
 import healthRoutes, { type ReadinessProbe } from './routes/health.js';
@@ -356,6 +357,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     await app.register(identifyRoutes, { prefix: '/api/v1' });
   }
   if (resolvedOptions.features.accounts) {
+    await app.register(observerSightingsRoutes, { prefix: '/api/v1' });
     await app.register(authRoutes, {
       includeSessionRoutes: resolvedOptions.observerAuth === undefined,
       prefix: '/api/v1/auth',
