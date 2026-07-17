@@ -15,9 +15,9 @@ import { resolveOptionalObserver, type ObserverPrincipal } from '../lib/observer
 /**
  * Photo-upload tokens are scoped to a specific sighting and to the
  * photo-upload action. They allow the offline submission queue to replay
- * photo POSTs after the public 30-minute upload window has closed without
- * exposing admin-level access. The 24-hour TTL is generous enough to cover a
- * ferry crossing and overnight without service.
+ * photo POSTs without an observer session; otherwise, non-admin uploads require
+ * the owning observer session plus CSRF. The 24-hour TTL is generous enough to
+ * cover a ferry crossing and overnight without service.
  */
 const PHOTO_UPLOAD_TOKEN_TTL = '24h';
 export const PHOTO_UPLOAD_TOKEN_TYPE = 'photo-upload';
