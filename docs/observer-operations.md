@@ -1,6 +1,6 @@
 # Observer production certification
 
-Run these checks only after [deployment.md](deployment.md) reaches the observer-enabled, exact same-SHA state. Use real production Apple accounts and a physical TestFlight device. Never paste identity tokens, authorization codes, cookies, CSRF tokens, email addresses, raw request bodies, or private object keys into the release record.
+Run these checks only after [deployment.md](deployment.md) reaches the observer-enabled state and the GitHub Actions commit matches the Render source commit. Use real production Apple accounts and a physical TestFlight device. Never paste identity tokens, authorization codes, cookies, CSRF tokens, email addresses, raw request bodies, or private object keys into the release record.
 
 Create two dedicated observer test accounts, Observer A and Observer B. Use unique, recognizable, non-sensitive test metadata and retain only sanitized record IDs and UTC timestamps.
 
@@ -35,14 +35,17 @@ Any cross-user access or identity/email leakage stops certification.
 
 1. Upload a bounded JPEG to Observer A's pending sighting using a stable photo UUID; exact replay must return the same photo rather than create another row/object.
 2. Verify original and thumbnail are private in object storage and are accessible only through the API's authorized signed media flow.
-3. Exercise one rejected upload/commit path and confirm compensating cleanup leaves no orphaned object.
-4. Record the media response checksum, trigger one no-code-change Render redeploy of the same SHA, then fetch again. The bytes and authorization result must match; this proves media survives an API redeploy.
+3. Do not inject a storage or database failure into production. Instead, attach the green GitHub Actions result for this same Git commit proving the injected post-storage database failure invokes compensation and leaves no database photo or private object.
+4. For a normal disposable upload, record sanitized database photo/variant counts and a before-and-after object inventory. Require exactly the expected original and thumbnail additions, then remove the disposable pending record through the supported deletion flow and require both inventories to return to baseline.
+5. Record the media response checksum, trigger one no-code-change Render redeploy from the same Git commit, then fetch again. The bytes and authorization result must match; this proves media survives an API redeploy.
 
 Any public bucket access, unauthorized signed media, missing variant, duplicate object, storage cleanup failure, or orphaned object stops certification.
 
 ## Deletion and Apple revocation
 
-Create a disposable Observer A pending submission/photo, then perform `DELETE /api/v1/auth/account` through the app with valid CSRF. Require Apple authorization revocation to succeed, client cookies/local observer state to clear, subsequent `/auth/me` to return `401`, and pending/rejected data plus media to be deleted. If testing an approved fixture, require the scientific record to remain only with observer identity irreversibly cleared.
+On a physical TestFlight device, begin the disposable account check with a fresh authorization code, fresh identityToken, and fresh nonce from a new Sign in with Apple authorization. Require nonce/identity-token verification to produce a verified Apple subject, require the authorization-code token exchange to succeed, and verify that subject matches the observer's stored Apple subject before creating any deletion fixture. Never record the credential values.
+
+Create a disposable Observer A pending submission/photo in that fresh session, then perform `DELETE /api/v1/auth/account` through the app with valid CSRF. Require Apple revocation of the exchanged authorization to succeed, client cookies/local observer state to clear, subsequent `/auth/me` to return `401`, and pending/rejected data plus media to be deleted. If testing an approved fixture, require the scientific record to remain only with observer identity irreversibly cleared.
 
 Any failed deletion, failed Apple revocation, surviving pending media, restored session, or identity remaining on an approved row stops certification.
 
@@ -60,4 +63,4 @@ Stop, switch to the all-off rollback, and do not certify on any:
 - failed deletion or session invalidation;
 - media mismatch after the Render redeploy.
 
-Certification requires a sanitized checklist tied to the GitHub run, deployed SHA, Render deployment, Neon database identity/restore point, TestFlight build, and UTC results for every operation above.
+Certification requires a sanitized checklist tied to the GitHub run/commit, matching Render source commit and deployment, Render image digest when exposed, Neon database identity/restore point, TestFlight build, and UTC results for every operation above. Production cleanup certification combines the exact-commit injected compensation test with the non-faulted disposable inventory check; it never claims a fake-free injected production failure.

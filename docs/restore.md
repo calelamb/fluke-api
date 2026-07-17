@@ -36,7 +36,34 @@ Record counts and discrepancies. A mismatch stops reopening. Repair only from a 
 
 ## Reconcile observer sessions and keys
 
-A restore can lower a user's `sessionVersion` and accidentally match an old signed cookie. Before reopening, invalidate all restored observer sessions by advancing every retained observer's `sessionVersion` beyond both the restored and incident-era values, then verify no restored observer session becomes valid. Test old cookies against `GET /api/v1/auth/me` and require `401` without logging cookie contents.
+A restore can lower a user's `sessionVersion` and accidentally match an old signed cookie. Keep the production service all-off. From incident evidence, calculate `:incidentMaxSessionVersion` as the maximum observer session version that could have signed a cookie before containment. Independently verify `:incidentMaxSessionVersion BETWEEN 1 AND 2147483646`; the upper bound leaves room for one invalidating increment.
+
+Run this bounded transactional update through a reviewed database client with bind-variable support. `ON_ERROR_STOP` (or the client's equivalent) is mandatory so a check, lock, overflow, or update failure rolls back the transaction:
+
+```sql
+BEGIN;
+SET LOCAL lock_timeout = '5s';
+CREATE TEMP TABLE "session_restore_bound" (
+  "incident_max" integer NOT NULL CHECK ("incident_max" BETWEEN 1 AND 2147483646)
+) ON COMMIT DROP;
+INSERT INTO "session_restore_bound" ("incident_max") VALUES (:incidentMaxSessionVersion);
+LOCK TABLE "users" IN SHARE ROW EXCLUSIVE MODE;
+UPDATE "users"
+SET "session_version" = GREATEST("session_version", :incidentMaxSessionVersion) + 1
+WHERE "role" = 'OBSERVER';
+COMMIT;
+```
+
+Record the affected observer count and the post-update minimum/maximum, not identities. A direct verifier must return zero:
+
+```sql
+SELECT COUNT(*) AS "sessions_not_invalidated"
+FROM "users"
+WHERE "role" = 'OBSERVER'
+  AND "session_version" <= :incidentMaxSessionVersion;
+```
+
+The public all-off API correctly returns `404` for the absent auth route, so it cannot prove stale-cookie rejection. Start an isolated non-public verifier from the matching Render source commit, connected to the restored candidate database with complete production dependencies and exactly `PRODUCTION_MUTATIONS_ACK=true`, `ENABLE_ACCOUNTS=true`, `ENABLE_SUBMISSIONS=true`, and `ENABLE_IDENTIFY=false`, but with no public ingress, DNS, or scheduled writers. Submit representative pre-incident cookies to `GET /api/v1/auth/me` and require canonical `401`; record only request IDs/statuses, then destroy the verifier. Together with the zero-row direct query, this verifies no restored observer session becomes valid. The production service remains all-off throughout. Any `200`, database mismatch, public exposure, or non-canonical response stops restoration.
 
 After suspected compromise, rotate all affected values before traffic returns:
 
@@ -55,4 +82,4 @@ Rotation must not silently make encrypted Apple refresh tokens unrecoverable. Re
 4. Resume scheduled jobs one at a time and inspect their append-only events.
 5. Re-enable observer capabilities only by running the complete same-SHA process in [deployment.md](deployment.md).
 
-Record the Neon restore point, old and new database identities, image SHA, migration output, object counts, session invalidation evidence, rotations, affected rows, and final probe results. A restored database alone is not production certification.
+Record the Neon restore point, old/new database identities, GitHub and Render source commits, Render image digest when exposed, migration output, object counts, session invalidation evidence, rotations, affected rows, and final probe results. A restored database alone is not production certification.

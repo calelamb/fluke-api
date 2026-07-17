@@ -9,19 +9,24 @@
 
 Render Free can cold-start after inactivity. A cold start is not permission to skip a probe or loosen the client retry bounds. Do not upgrade Render, add a paid service, or add a payment method without an explicit cost decision.
 
+## Zero-cost gate
+
+Before provisioning, record the current Neon free-plan quota and object-storage free-tier quota from each provider's account page. Record current usage, retention, transfer/request limits, and a conservative launch projection proving projected launch usage remains within both. Require the Render Free service, Neon database, and object store to need no payment method, paid trial, or paid upgrade. Any quota overrun, required card, expiring trial, or non-zero projected charge stops launch for an explicit cost decision.
+
 ## Release record
 
 Create one release record before changing production. Record:
 
 - the candidate Git SHA and GitHub Actions URL;
-- the Render service and deployment IDs;
+- the Render service/deployment IDs and Render source commit SHA;
+- the Render image digest, only if Render exposes one;
 - the Neon project, branch, database, and database identity;
 - the Neon restore point timestamp or branch ID;
 - the private bucket and object count, never its credentials;
 - the physical TestFlight build number and device model;
 - the operator, UTC start time, and each probe result.
 
-Every item below must reference the same Git SHA. Stop if the candidate SHA, GitHub SHA, image SHA, or deployed SHA differs.
+The GitHub Actions commit SHA must equal the Render source commit SHA. The Render image digest is a separate artifact: record it when exposed, but never compare a digest to a Git SHA. Stop if GitHub and Render source commits differ or Render does not identify the source commit.
 
 ## External prerequisite gate
 
@@ -31,14 +36,15 @@ Before touching production, confirm:
 - An Apple Sign in with Apple server key exists. Its key ID and unencrypted PKCS8 `.p8` content are held only by the Render secret store.
 - `OBSERVER_JWT_SECRET`, `OBSERVER_CSRF_SECRET`, and `APPLE_TOKEN_ENCRYPTION_KEY` were generated independently. Never copy their values into the release record.
 - The object bucket is private and its credentials are limited to `GetObject`, `PutObject`, and `DeleteObject` for that bucket.
-- The published privacy/support pages and App Store privacy answers describe Apple identifiers, observer email, locations, notes, photos, retention, deletion, and the storage processor.
+- GET https://fluke-pnw.vercel.app/privacy must return `200` and GET https://fluke-pnw.vercel.app/support must return `200`; record response time, final URL, and UTC result.
+- Record the submitted App Store privacy answers and confirm both public pages match these exact categories: Apple account identifier, observer email, submitted coarse location, notes and photos, retention and deletion, and the private object-storage processor. Record that these data support App Functionality, that signed-account data can be linked to the observer, and that Fluke does not use the data for tracking or third-party advertising. Any missing/mismatched answer, disclosure, or redirect/error response stops launch.
 - The approved-account deletion policy is recorded: pending/rejected records and media are deleted; approved scientific records are retained only after observer identity is irreversibly cleared.
 
 Any missing prerequisite stops the release.
 
 ## Same-SHA CI gate
 
-Require the exact same Git SHA to be green in GitHub Actions. The run must include Node 22.17.0, PostgreSQL integration, migration and seed verification, coverage, lint/typecheck/contracts, production audit, full-history Gitleaks, image build, and both all-off and observer-enabled container smoke tests. Do not deploy a local-only build or a newer unverified commit.
+Require the candidate commit to be green in GitHub Actions. The run must include Node 22.17.0, PostgreSQL integration, migration and seed verification, coverage, lint/typecheck/contracts, production audit, full-history Gitleaks, image build, and both all-off and observer-enabled container smoke tests. Render must then report that exact commit as its source revision. Do not deploy a local-only build or a newer unverified commit.
 
 ## Database gate
 
@@ -83,7 +89,7 @@ Partial secret sets, local storage, partial account/submission flags, or Identif
 
 ## Safe all-off deploy
 
-1. Deploy the exact same-SHA image to Render Free with the all-off flags.
+1. Deploy Render's build from the verified source commit with the all-off flags.
 2. Require public `200` responses from `GET /api/v1/health` and `GET /api/v1/ready`.
 3. Require `GET /api/v1/capabilities` to return exactly:
 
@@ -107,7 +113,7 @@ ENABLE_SUBMISSIONS=true
 ENABLE_IDENTIFY=false
 ```
 
-Deploy the unchanged same-SHA image. Require health and readiness `200`, then require `GET /api/v1/capabilities` to return exactly `{"accounts":true,"identification":false,"submissions":true}`. POST /api/v1/identify must return 404 using the canonical error envelope.
+Deploy the unchanged Render source commit. Require health and readiness `200`, then require `GET /api/v1/capabilities` to return exactly `{"accounts":true,"identification":false,"submissions":true}`. POST /api/v1/identify must return 404 using the canonical error envelope.
 
 Do not open or announce observer access yet. The auth route is intentionally unregistered in the all-off state, so the physical production sign-in gate can occur only after this exact state is live. Any failure from this point requires the all-off rollback.
 
@@ -117,7 +123,17 @@ Immediately use the candidate iOS build on a physical TestFlight device. Complet
 
 Run every fake-free check in [observer-operations.md](observer-operations.md), including proof that media survives an API redeploy on Render. Record sanitized IDs and pass/fail results, never cookies, tokens, email, request bodies, private keys, or object keys.
 
-Do not certify the release until all checks pass against the same deployed SHA. Immediately follow [rollback.md](rollback.md) on any stop condition.
+## Mandatory rollback drill
+
+Before certification, complete one successful-path rollback drill using the current verified commit:
+
+1. Follow **Close mutations first** in [rollback.md](rollback.md) without reverting code.
+2. Require `GET /api/v1/capabilities` to return exactly `{"accounts":false,"identification":false,"submissions":false}`.
+3. Run every exact method/path probe in the rollback runbook and require the canonical `404` envelope for auth, mutation, media, and Identify routes while the listed healthy browse routes return `200`.
+4. Record the rollback drill evidence: GitHub commit, Render source commit/deployment, UTC flag change, every status/envelope, browse result, and database/object counts.
+5. Perform a controlled same-commit re-enable by repeating **Enable observer launch state**, the physical TestFlight Apple gate, and all checks in [observer-operations.md](observer-operations.md). Require the exact enabled capability JSON and Identify `404` again.
+
+Do not certify the release until the original launch checks and this close/reopen drill pass against the same Git commit. Immediately restore all-off and investigate on any stop condition.
 
 ## Railway alternative
 

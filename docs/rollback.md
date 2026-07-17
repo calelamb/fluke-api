@@ -11,7 +11,21 @@ This procedure closes observer writes before code changes. Prisma migrations are
 5. Keep `ENABLE_IDENTIFY=false`.
 6. In one Render operation, redeploy the current exact image with those all-off values.
 7. Require `GET /api/v1/health` and `GET /api/v1/ready` to return `200` and capabilities to be exactly `{"accounts":false,"identification":false,"submissions":false}`.
-8. Require Apple auth, account, sighting mutation, photo mutation, and Identify endpoints to return 404 while anonymous browse routes remain healthy.
+8. Require every disabled observer endpoint below to return 404 while anonymous browse routes remain healthy.
+
+Probe these exact methods and paths after the all-off deployment. Replace `:id` with a fixed non-sensitive sentinel ID; because the route must be unregistered, the chosen ID cannot change the result.
+
+- POST `/api/v1/auth/apple`
+- GET `/api/v1/auth/me`
+- POST `/api/v1/auth/logout`
+- DELETE `/api/v1/auth/account`
+- GET `/api/v1/sightings/me`
+- POST `/api/v1/sightings`
+- POST `/api/v1/sightings/:id/photos`
+- GET `/api/v1/media/:photoId`
+- POST `/api/v1/identify`
+
+Every response must use the canonical envelope `{"code":"NOT_FOUND","message":"The requested resource was not found.","requestId":"<non-empty>","retryable":false}` with a real non-empty request ID and no reflected cookie, token, email, or payload. Require `GET /api/v1/whales` and `GET /api/v1/sightings` to return `200`. Record methods, sanitized paths, statuses, envelope validation, UTC time, Render source commit/deployment, database identity, and object count.
 
 If the all-off image cannot become ready, keep public traffic closed. Do not re-enable a partial flag combination.
 

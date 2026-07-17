@@ -205,7 +205,7 @@ describe('release configuration', () => {
       '## Physical TestFlight Apple gate',
     ]);
     for (const gate of [
-      'same Git SHA',
+      'GitHub Actions commit SHA must equal the Render source commit SHA',
       'Neon restore point',
       '20260717170000_add_observer_submissions',
       'ENABLE_ACCOUNTS=false',
@@ -290,5 +290,118 @@ describe('release configuration', () => {
     ]) {
       expect(restore).toContain(requirement);
     }
+  });
+
+  it('requires a successful all-off rollback drill before production certification', () => {
+    const deployment = readRepositoryFile('docs/deployment.md');
+    const drill = deployment.slice(deployment.indexOf('## Mandatory rollback drill'));
+
+    expectInOrder(drill, [
+      '## Mandatory rollback drill',
+      '{"accounts":false,"identification":false,"submissions":false}',
+      'canonical `404`',
+      'healthy browse',
+      'controlled same-commit re-enable',
+      'Do not certify',
+    ]);
+    expect(deployment).toContain('Record the rollback drill evidence');
+  });
+
+  it('invalidates restored sessions through a bounded transaction and non-public verifier', () => {
+    const restore = readRepositoryFile('docs/restore.md');
+
+    for (const requirement of [
+      'BEGIN;',
+      'GREATEST("session_version", :incidentMaxSessionVersion) + 1',
+      ':incidentMaxSessionVersion BETWEEN 1 AND 2147483646',
+      'COMMIT;',
+      'isolated non-public verifier',
+      'production service remains all-off',
+      'GET /api/v1/auth/me',
+      'canonical `401`',
+    ]) {
+      expect(restore).toContain(requirement);
+    }
+  });
+
+  it('matches GitHub and Render source commits without conflating the image digest', () => {
+    const deployment = readRepositoryFile('docs/deployment.md');
+
+    expect(deployment).toContain(
+      'GitHub Actions commit SHA must equal the Render source commit SHA',
+    );
+    expect(deployment).toContain('Render image digest is a separate artifact');
+    expect(deployment).not.toContain('image SHA');
+  });
+
+  it('proves account deletion with fresh physical Apple credentials and subject continuity', () => {
+    const operations = readRepositoryFile('docs/observer-operations.md');
+
+    for (const requirement of [
+      'fresh authorization code',
+      'fresh identityToken',
+      'fresh nonce',
+      'verified Apple subject',
+      'token exchange',
+      'Apple revocation',
+    ]) {
+      expect(operations).toContain(requirement);
+    }
+  });
+
+  it('uses same-commit CI compensation evidence instead of injecting a production failure', () => {
+    const operations = readRepositoryFile('docs/observer-operations.md');
+
+    expect(operations).toContain('Do not inject a storage or database failure into production');
+    expect(operations).toContain('same Git commit');
+    expect(operations).toContain('injected post-storage database failure');
+    expect(operations).toContain('normal disposable upload');
+    expect(operations).toContain('before-and-after object inventory');
+  });
+
+  it('requires exact public privacy probes and records matching App Store answers', () => {
+    const deployment = readRepositoryFile('docs/deployment.md');
+
+    expect(deployment).toContain('GET https://fluke-pnw.vercel.app/privacy must return `200`');
+    expect(deployment).toContain('GET https://fluke-pnw.vercel.app/support must return `200`');
+    for (const disclosure of [
+      'Apple account identifier',
+      'observer email',
+      'submitted coarse location',
+      'notes and photos',
+      'retention and deletion',
+      'private object-storage processor',
+    ]) {
+      expect(deployment).toContain(disclosure);
+    }
+  });
+
+  it('keeps Neon and object storage within verified zero-cost quotas', () => {
+    const deployment = readRepositoryFile('docs/deployment.md');
+
+    expect(deployment).toContain('Neon free-plan quota');
+    expect(deployment).toContain('object-storage free-tier quota');
+    expect(deployment).toContain('projected launch usage remains within both');
+    expect(deployment).toContain('no payment method');
+  });
+
+  it('probes every disabled observer route with exact methods and canonical envelopes', () => {
+    const rollback = readRepositoryFile('docs/rollback.md');
+
+    for (const route of [
+      'POST `/api/v1/auth/apple`',
+      'GET `/api/v1/auth/me`',
+      'POST `/api/v1/auth/logout`',
+      'DELETE `/api/v1/auth/account`',
+      'GET `/api/v1/sightings/me`',
+      'POST `/api/v1/sightings`',
+      'POST `/api/v1/sightings/:id/photos`',
+      'POST `/api/v1/identify`',
+    ]) {
+      expect(rollback).toContain(route);
+    }
+    expect(rollback).toContain(
+      '`{"code":"NOT_FOUND","message":"The requested resource was not found.","requestId":"<non-empty>","retryable":false}`',
+    );
   });
 });

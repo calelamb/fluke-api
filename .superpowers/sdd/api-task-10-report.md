@@ -57,3 +57,27 @@ Fresh commands and results:
 ## Concern / external production gates
 
 No production deployment, Render mutation, migration, live flag change, paid upgrade, Apple sign-in, TestFlight action, Neon restore point, or object-store operation was performed by this task. The local environment has no Docker executable, so the real MinIO adapter and dual production-image smoke remain mandatory GitHub Actions gates. The physical TestFlight, private-bucket durability, live Apple revocation, same-SHA Render redeploy, and restore drill remain operator-executed production certification gates; the runbooks explicitly prohibit certification without their recorded evidence.
+
+## Review remediation
+
+Independent review blocked the initial runbooks on six Important and two Minor gaps. All eight are now represented by behavior-focused release-config regressions and remediated:
+
+- Production certification now requires a successful all-off rollback drill, exact closed-route envelopes and healthy browse evidence, followed by a controlled re-enable of the unchanged Render source commit through the physical TestFlight and observer gates.
+- Restore uses a bounded transactional `sessionVersion` update beyond the recorded incident maximum, a zero-row direct verifier, and a temporary isolated non-public enabled verifier for stale-cookie `401` proof while production remains all-off.
+- Same-code evidence now compares the GitHub Actions commit SHA with Render's source commit SHA. A Render image digest is recorded separately when exposed and is never conflated with a Git SHA.
+- Deletion/revocation certification begins with a fresh physical-device Apple authorization code, identity token, and nonce; it requires verified subject continuity, token exchange, and Apple revocation.
+- Production no longer injects a storage/database failure. Compensation evidence comes from the exact-commit CI injected failure test, while production verifies a normal disposable upload with before/after database and object inventories.
+- The prerequisite gate requires exact `200` probes for the public privacy and support pages plus recorded App Store privacy-answer content.
+- The zero-cost gate records current Neon and object-store free quotas, projected launch usage, and requires no card, paid trial, or paid upgrade.
+- Rollback lists every disabled observer method/path, the exact canonical `NOT_FOUND` envelope, healthy browse probes, and the evidence record.
+
+Remediation TDD evidence:
+
+- RED: `pnpm vitest run tests/release-config.test.ts` produced exactly 8 expected failures for the eight review gaps.
+- GREEN: the same focused suite passed 29/29 after remediation.
+
+Fresh post-remediation verification used Node v22.17.0, pnpm 10.33.0, and a clean PostgreSQL 16 database on port 55443:
+
+- All 10 migrations applied and status was current.
+- Layout, contracts, typecheck, lint, build, production audit, actionlint, Gitleaks, and diff checks passed.
+- Real PostgreSQL coverage passed: 54 files; 511 passed, 1 Docker-only MinIO test skipped; 91.74% statements/lines, 86.67% branches, 95.11% functions.
