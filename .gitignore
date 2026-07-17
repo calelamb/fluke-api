@@ -8,3 +8,4 @@ uploads/
 prisma/migrations/dev/
 .DS_Store
 *.log
+.worktrees/
