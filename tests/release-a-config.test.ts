@@ -80,6 +80,31 @@ describe('Release A environment configuration', () => {
   });
 
   it.each([
+    ['ULA fc00::/7 start', 'https://[fc00::1]'],
+    ['ULA fd00::/8', 'https://[fd12:3456::1]'],
+    ['link-local fe80::/10', 'https://[fe80::1]'],
+    ['loopback', 'https://[::1]'],
+    ['unspecified', 'https://[::]'],
+    ['IPv4-mapped loopback', 'https://[::ffff:127.0.0.1]'],
+    ['IPv4-mapped private 10/8', 'https://[::ffff:10.0.0.1]'],
+    ['IPv4-mapped private 172.16/12', 'https://[::ffff:172.16.0.1]'],
+    ['IPv4-mapped private 192.168/16', 'https://[::ffff:192.168.1.1]'],
+    ['IPv4-mapped link-local', 'https://[::ffff:169.254.1.1]'],
+  ])('rejects the private or local IPv6 class %s', (_name, origin) => {
+    expect(() => parseEnv({
+      ...SAFE_PRODUCTION_ENV,
+      API_PUBLIC_ORIGIN: origin,
+    })).toThrow(/API_PUBLIC_ORIGIN/);
+  });
+
+  it('accepts a globally routable IPv6 production origin', () => {
+    expect(parseEnv({
+      ...SAFE_PRODUCTION_ENV,
+      API_PUBLIC_ORIGIN: 'https://[2606:4700:4700::1111]',
+    }).API_PUBLIC_ORIGIN).toBe('https://[2606:4700:4700::1111]');
+  });
+
+  it.each([
     'ENABLE_ACCOUNTS',
     'ENABLE_IDENTIFY',
     'ENABLE_SUBMISSIONS',

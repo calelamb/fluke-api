@@ -87,10 +87,10 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   });
   await app.register(rateLimit, { global: false });
   await app.register(sensible);
-  const hasUploadSurface = resolvedOptions.features.accounts
+  const requiresMultipart = resolvedOptions.features.accounts
     || resolvedOptions.features.identification
     || resolvedOptions.features.submissions;
-  if (hasUploadSurface) {
+  if (requiresMultipart) {
     await app.register(multipart, {
       limits: {
         fileSize: 10 * 1024 * 1024, // 10 MB per file
@@ -99,7 +99,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     });
   }
 
-  if (hasUploadSurface && env.STORAGE_BACKEND === 'local') {
+  if (resolvedOptions.features.submissions && env.STORAGE_BACKEND === 'local') {
     const uploadsRoot = resolveUploadsDir();
     await mkdir(uploadsRoot, { recursive: true });
     await app.register(staticPlugin, {

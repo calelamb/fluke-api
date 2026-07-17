@@ -1,3 +1,4 @@
+import ipaddr from 'ipaddr.js';
 import { z } from 'zod';
 
 const DEVELOPMENT_WEB_ORIGINS = 'http://localhost:5174,http://localhost:5173';
@@ -68,19 +69,24 @@ const envSchema = z
 
 export type Env = z.infer<typeof envSchema>;
 
-function isPrivateIpv4(hostname: string): boolean {
-  const octets = hostname.split('.').map(Number);
-  if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet))) {
+const LOCAL_IP_RANGES = [
+  'linkLocal',
+  'loopback',
+  'private',
+  'uniqueLocal',
+  'unspecified',
+] as const;
+
+function isPrivateOrLocalIp(hostname: string): boolean {
+  const address = hostname.startsWith('[') && hostname.endsWith(']')
+    ? hostname.slice(1, -1)
+    : hostname;
+  if (!ipaddr.isValid(address)) {
     return false;
   }
 
-  const [first, second] = octets;
-  return first === 0
-    || first === 10
-    || first === 127
-    || (first === 169 && second === 254)
-    || (first === 172 && second >= 16 && second <= 31)
-    || (first === 192 && second === 168);
+  const range = ipaddr.process(address).range();
+  return (LOCAL_IP_RANGES as readonly string[]).includes(range);
 }
 
 function productionOriginIssue(origin: string): string | null {
@@ -90,7 +96,6 @@ function productionOriginIssue(origin: string): string | null {
     || hostname.endsWith('.localhost')
     || hostname.endsWith('.local')
     || hostname.endsWith('.internal');
-  const isLocalIpv6 = hostname === '[::1]' || hostname === '[::]';
 
   if (parsed.protocol !== 'https:') {
     return 'must use HTTPS';
@@ -98,7 +103,7 @@ function productionOriginIssue(origin: string): string | null {
   if (hostname.includes('*')) {
     return 'must not contain a wildcard host';
   }
-  if (isLocalName || isLocalIpv6 || isPrivateIpv4(hostname)) {
+  if (isLocalName || isPrivateOrLocalIp(hostname)) {
     return 'must use a non-local public host';
   }
   if (parsed.username || parsed.password) {

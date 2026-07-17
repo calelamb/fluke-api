@@ -41,6 +41,9 @@ importers:
       fastify:
         specifier: 5.10.0
         version: 5.10.0
+      ipaddr.js:
+        specifier: 2.4.0
+        version: 2.4.0
       sharp:
         specifier: 0.34.5
         version: 0.34.5
