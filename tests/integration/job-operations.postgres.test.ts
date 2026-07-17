@@ -55,4 +55,22 @@ describe.runIf(postgresEnabled)('job operations against PostgreSQL', () => {
     })).rejects.toThrow('job_run_events are append-only');
     await store.release(lease);
   });
+
+  it('cannot append stale success after another owner reclaims the job', async () => {
+    const staleRunId = randomUUID();
+    const stale = await store.acquire(jobName, staleRunId, randomUUID());
+    expect(stale).not.toBeNull();
+    if (!stale) return;
+
+    await store.release(stale);
+    const replacement = await store.acquire(jobName, randomUUID(), randomUUID());
+    expect(replacement).not.toBeNull();
+    if (!replacement) return;
+
+    await expect(store.finalizeSuccess(stale, { processed: 1 })).resolves.toBe(false);
+    await expect(prisma.jobRunEvent.count({
+      where: { event: 'SUCCEEDED', runId: staleRunId },
+    })).resolves.toBe(0);
+    await store.release(replacement);
+  });
 });

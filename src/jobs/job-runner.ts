@@ -33,6 +33,7 @@ export interface JobEvent extends JobLease {
 export interface JobLeaseStore {
   acquire(jobName: string, runId: string, ownerToken: string): Promise<JobLease | null>;
   append(event: JobEvent): Promise<void>;
+  finalizeSuccess(lease: JobLease, summary: JobSummary): Promise<boolean>;
   heartbeat(lease: JobLease): Promise<boolean>;
   release(lease: JobLease): Promise<void>;
 }
@@ -130,9 +131,8 @@ export async function runLockedJob(
   try {
     const summary = await options.work(controller.signal, lease);
     if (controller.signal.aborted) throw controller.signal.reason;
-    const retained = await options.store.heartbeat(lease).catch(() => false);
-    if (!retained) throw new LeaseLostError();
-    await options.store.append(eventFor(lease, 'SUCCEEDED', { summary }));
+    const finalized = await options.store.finalizeSuccess(lease, summary).catch(() => false);
+    if (!finalized) throw new LeaseLostError();
     return { exitCode: JOB_EXIT.SUCCESS, summary };
   } catch (error: unknown) {
     const leaseLost = error instanceof LeaseLostError

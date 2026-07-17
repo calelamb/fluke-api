@@ -10,6 +10,7 @@ import {
 class MemoryLeaseStore implements JobLeaseStore {
   readonly events: JobEvent[] = [];
   private active: JobLease | null = null;
+  private heartbeatOverride: boolean | null = null;
   private nextFence = 1n;
 
   async acquire(jobName: string, runId: string, ownerToken: string): Promise<JobLease | null> {
@@ -24,7 +25,19 @@ class MemoryLeaseStore implements JobLeaseStore {
     this.events.push(event);
   }
 
+  async finalizeSuccess(lease: JobLease, summary: Readonly<Record<string, string | number | boolean | null>>): Promise<boolean> {
+    if (
+      this.active?.jobName !== lease.jobName
+      || this.active.runId !== lease.runId
+      || this.active.ownerToken !== lease.ownerToken
+      || this.active.fence !== lease.fence
+    ) return false;
+    this.events.push({ ...lease, event: 'SUCCEEDED', summary });
+    return true;
+  }
+
   async heartbeat(lease: JobLease): Promise<boolean> {
+    if (this.heartbeatOverride !== null) return this.heartbeatOverride;
     return this.active?.ownerToken === lease.ownerToken;
   }
 
@@ -34,6 +47,10 @@ class MemoryLeaseStore implements JobLeaseStore {
 
   loseLease(): void {
     if (this.active) this.active = { ...this.active, ownerToken: 'replacement' };
+  }
+
+  forceHeartbeatSuccess(): void {
+    this.heartbeatOverride = true;
   }
 }
 
@@ -146,13 +163,14 @@ describe('runLockedJob', () => {
     });
   });
 
-  it('rechecks lease ownership before recording success', async () => {
+  it('does not record stale success when ownership changes before finalization', async () => {
     const store = new MemoryLeaseStore();
 
     const result = await runLockedJob({
       jobName: 'prediction-compute',
       store,
       work: async () => {
+        store.forceHeartbeatSuccess();
         store.loseLease();
         return { processed: 1 };
       },
@@ -163,5 +181,6 @@ describe('runLockedJob', () => {
       errorCode: 'LEASE_LOST',
       event: 'LEASE_LOST',
     });
+    expect(store.events.some(({ event }) => event === 'SUCCEEDED')).toBe(false);
   });
 });

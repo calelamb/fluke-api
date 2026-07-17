@@ -3,6 +3,7 @@ import type {
   JobEvent,
   JobLease,
   JobLeaseStore,
+  JobSummary,
 } from './job-runner.js';
 
 const DEFAULT_LEASE_MS = 20 * 60 * 1_000;
@@ -75,6 +76,26 @@ export class PostgresJobLeaseStore implements JobLeaseStore {
 
   async append(event: JobEvent): Promise<void> {
     await this.#client.jobRunEvent.create({ data: eventData(event) });
+  }
+
+  async finalizeSuccess(lease: JobLease, summary: JobSummary): Promise<boolean> {
+    return this.#client.$transaction(async (transaction) => {
+      const [row] = await transaction.$queryRaw<Array<{ retained: boolean }>>`
+        SELECT true AS "retained"
+        FROM "job_leases"
+        WHERE "job_name" = ${lease.jobName}
+          AND "run_id" = ${lease.runId}
+          AND "owner_token" = ${lease.ownerToken}
+          AND "fence" = ${lease.fence}
+          AND "lease_expires_at" > CURRENT_TIMESTAMP
+        FOR UPDATE
+      `;
+      if (!row?.retained) return false;
+      await transaction.jobRunEvent.create({
+        data: eventData({ ...lease, event: 'SUCCEEDED', summary }),
+      });
+      return true;
+    }, { timeout: TRANSACTION_TIMEOUT_MS });
   }
 
   async heartbeat(lease: JobLease): Promise<boolean> {

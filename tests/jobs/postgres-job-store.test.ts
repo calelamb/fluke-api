@@ -63,4 +63,34 @@ describe('PostgresJobLeaseStore', () => {
     await expect(store.runFenced(lease, operation)).rejects.toThrow('lease is no longer current');
     expect(operation).not.toHaveBeenCalled();
   });
+
+  it('verifies the exact lease and appends success in one transaction', async () => {
+    const transaction = {
+      $queryRaw: vi.fn(async () => [{ retained: true }]),
+      jobRunEvent: { create: vi.fn(async () => undefined) },
+    };
+    const store = new PostgresJobLeaseStore(clientFromTransaction(transaction));
+
+    await expect(store.finalizeSuccess(lease, { processed: 2 })).resolves.toBe(true);
+    expect(transaction.$queryRaw).toHaveBeenCalledOnce();
+    expect(transaction.jobRunEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        event: 'SUCCEEDED',
+        fence: 4n,
+        runId: 'run',
+        summary: { processed: 2 },
+      }),
+    });
+  });
+
+  it('does not append success after the exact lease is lost', async () => {
+    const transaction = {
+      $queryRaw: vi.fn(async () => []),
+      jobRunEvent: { create: vi.fn(async () => undefined) },
+    };
+    const store = new PostgresJobLeaseStore(clientFromTransaction(transaction));
+
+    await expect(store.finalizeSuccess(lease, { processed: 2 })).resolves.toBe(false);
+    expect(transaction.jobRunEvent.create).not.toHaveBeenCalled();
+  });
 });
