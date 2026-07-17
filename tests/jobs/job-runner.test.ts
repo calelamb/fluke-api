@@ -123,4 +123,26 @@ describe('runLockedJob', () => {
     expect(result.exitCode).toBe(JOB_EXIT.LEASE_LOST);
     expect(store.events.at(-1)?.event).toBe('LEASE_LOST');
   });
+
+  it('aborts work at the configured deadline and records a safe timeout code', async () => {
+    const store = new MemoryLeaseStore();
+
+    const result = await runLockedJob({
+      jobName: 'gbif-ingest',
+      ownerToken: 'owner-timeout',
+      runId: 'run-timeout',
+      store,
+      timeoutMs: 5,
+      work: async (signal) => {
+        await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve()));
+        throw signal.reason;
+      },
+    });
+
+    expect(result.exitCode).toBe(JOB_EXIT.FAILURE);
+    expect(store.events.at(-1)).toMatchObject({
+      errorCode: 'JOB_TIMEOUT',
+      event: 'FAILED',
+    });
+  });
 });

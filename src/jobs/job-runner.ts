@@ -52,6 +52,7 @@ export interface RunLockedJobOptions {
   readonly runId?: string;
   readonly store: JobLeaseStore;
   readonly timers?: JobTimers;
+  readonly timeoutMs?: number;
   readonly work: (signal: AbortSignal, lease: JobLease) => Promise<JobSummary>;
 }
 
@@ -64,6 +65,13 @@ class LeaseLostError extends Error {
   constructor() {
     super('Scheduled job lease was lost');
     this.name = 'LeaseLostError';
+  }
+}
+
+class JobTimeoutError extends Error {
+  constructor() {
+    super('Scheduled job exceeded its deadline');
+    this.name = 'JobTimeoutError';
   }
 }
 
@@ -109,6 +117,15 @@ export async function runLockedJob(
       },
     );
   }, heartbeatMs);
+  const timeoutMs = options.timeoutMs ?? 10 * 60 * 1_000;
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
+    timers.clearInterval(heartbeat);
+    await options.store.release(lease);
+    throw new Error('timeoutMs must be a positive integer');
+  }
+  const deadline = setTimeout(() => {
+    if (!controller.signal.aborted) controller.abort(new JobTimeoutError());
+  }, timeoutMs);
 
   try {
     const summary = await options.work(controller.signal, lease);
@@ -118,11 +135,14 @@ export async function runLockedJob(
   } catch (error: unknown) {
     const leaseLost = error instanceof LeaseLostError
       || controller.signal.reason instanceof LeaseLostError;
+    const timedOut = error instanceof JobTimeoutError
+      || controller.signal.reason instanceof JobTimeoutError;
     await options.store.append(eventFor(lease, leaseLost ? 'LEASE_LOST' : 'FAILED', {
-      errorCode: leaseLost ? 'LEASE_LOST' : 'JOB_FAILED',
+      errorCode: leaseLost ? 'LEASE_LOST' : timedOut ? 'JOB_TIMEOUT' : 'JOB_FAILED',
     }));
     return { exitCode: leaseLost ? JOB_EXIT.LEASE_LOST : JOB_EXIT.FAILURE };
   } finally {
+    clearTimeout(deadline);
     timers.clearInterval(heartbeat);
     await options.store.release(lease);
   }
