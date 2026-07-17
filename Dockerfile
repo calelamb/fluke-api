@@ -1,4 +1,7 @@
-FROM node:22.17.0-bookworm-slim AS build
+FROM node:22.17.0-bookworm-slim AS base
+RUN apt-get update -y && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
+
+FROM base AS build
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 COPY package.json pnpm-lock.yaml ./
@@ -9,7 +12,7 @@ COPY src ./src
 COPY scripts ./scripts
 RUN pnpm db:generate && pnpm build && pnpm prune --prod
 
-FROM node:22.17.0-bookworm-slim AS runtime
+FROM base AS runtime
 ENV NODE_ENV=production
 ENV UPLOADS_DIR=/app/uploads
 WORKDIR /app

@@ -47,6 +47,15 @@ describe('release configuration', () => {
     expect(dockerfile).toContain('RUN mkdir -p /app/uploads && chown node:node /app/uploads');
   });
 
+  it('uses an OpenSSL-equipped base for Prisma generation and runtime', () => {
+    const dockerfile = readRepositoryFile('Dockerfile');
+
+    expect(dockerfile).toContain('FROM node:22.17.0-bookworm-slim AS base');
+    expect(dockerfile).toMatch(/apt-get install[^\n]*openssl/u);
+    expect(dockerfile).toContain('FROM base AS build');
+    expect(dockerfile).toContain('FROM base AS runtime');
+  });
+
   it('documents the effective production release configuration', () => {
     const readme = readRepositoryFile('README.md');
 
