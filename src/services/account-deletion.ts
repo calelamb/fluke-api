@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import type { StorageBackend } from '../lib/storage.js';
+import { relatedSightingPhotoKeys } from '../lib/storage.js';
 import type { TokenCrypto } from '../lib/token-crypto.js';
 import type { AppleAuthService } from './apple-auth.js';
 
@@ -110,7 +111,7 @@ async function deletePrivateData(
       appleSub: request.appleSub,
     },
   });
-  return photos.map(({ storageKey }) => storageKey);
+  return photos.flatMap(({ storageKey }) => relatedSightingPhotoKeys(storageKey));
 }
 
 export async function deleteObserverAccount(

@@ -5,6 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import type { FastifyInstance } from 'fastify';
 import sharp from 'sharp';
 import FormData from 'form-data';
+import type { StorageBackend } from '../lib/storage.js';
 
 vi.mock('../db.js', () => ({
   prisma: {
@@ -20,6 +21,7 @@ vi.mock('../db.js', () => ({
       count: vi.fn(),
       create: vi.fn(),
       findMany: vi.fn(),
+      findUnique: vi.fn(),
     },
     sightingWhale: { upsert: vi.fn() },
     auditLog: { create: vi.fn() },
@@ -29,14 +31,20 @@ vi.mock('../db.js', () => ({
 const { prisma } = await import('../db.js');
 
 let uploadsRoot: string;
+let storageOverride: StorageBackend | null = null;
+
+const resolveOptionalObserver = vi.fn();
+vi.mock('../lib/observer-auth.js', async () => {
+  const actual = await vi.importActual<typeof import('../lib/observer-auth.js')>('../lib/observer-auth.js');
+  return { ...actual, resolveOptionalObserver };
+});
 
 vi.mock('../lib/storage.js', async () => {
   const actual = await vi.importActual<typeof import('../lib/storage.js')>('../lib/storage.js');
   return {
     ...actual,
     resolveUploadsDir: () => uploadsRoot,
-    getStorageBackend: () =>
-      new actual.LocalDiskBackend({
+    getStorageBackend: () => storageOverride ?? new actual.LocalDiskBackend({
         rootDir: uploadsRoot,
         apiOrigin: 'http://localhost:4000',
       }),
@@ -91,6 +99,8 @@ describe('POST /api/v1/sightings/:id/photos', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    storageOverride = null;
+    resolveOptionalObserver.mockResolvedValue(null);
   });
 
   describe('photo-upload token (offline replay)', () => {
@@ -401,9 +411,9 @@ describe('POST /api/v1/sightings/:id/photos', () => {
         data: expect.objectContaining({
           sightingId: 's1',
           orderIndex: 0,
-          url: expect.stringMatching(/^http:\/\/localhost:4000\/uploads\/sightings\/s1\/.+-1024\.webp$/),
+          url: expect.stringMatching(/^http:\/\/localhost:4000\/api\/v1\/media\/[a-f0-9-]+$/),
           thumbnailUrl: expect.stringMatching(
-            /^http:\/\/localhost:4000\/uploads\/sightings\/s1\/.+-256\.webp$/,
+            /^http:\/\/localhost:4000\/api\/v1\/media\/[a-f0-9-]+\?variant=thumbnail$/,
           ),
         }),
       }),
@@ -412,5 +422,159 @@ describe('POST /api/v1/sightings/:id/photos', () => {
     const written = await readdir(path.join(uploadsRoot, 'sightings/s1'));
     expect(written.some((f) => f.endsWith('-1024.webp'))).toBe(true);
     expect(written.some((f) => f.endsWith('-256.webp'))).toBe(true);
+  });
+
+  it('removes the large object if the thumbnail upload fails', async () => {
+    vi.mocked(prisma.sighting.findUnique).mockResolvedValue(recentPendingSighting() as never);
+    vi.mocked(prisma.sightingPhoto.count).mockResolvedValue(0);
+    const remove = vi.fn().mockResolvedValue(undefined);
+    const put = vi.fn()
+      .mockResolvedValueOnce({ key: 'sightings/s1/large-1024.webp', size: 10 })
+      .mockRejectedValueOnce(new Error('storage unavailable'));
+    storageOverride = { put, remove, publicUrl: vi.fn() };
+
+    const form = new FormData();
+    form.append('file', await buildPng(), { filename: 'orca.png', contentType: 'image/png' });
+    const response = await app.inject({
+      method: 'POST', url: '/api/v1/sightings/s1/photos', payload: form, headers: form.getHeaders(),
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(remove).toHaveBeenCalledWith('sightings/s1/large-1024.webp');
+    expect(prisma.sightingPhoto.create).not.toHaveBeenCalled();
+  });
+
+  it('removes both objects if the database write fails', async () => {
+    vi.mocked(prisma.sighting.findUnique).mockResolvedValue(recentPendingSighting() as never);
+    vi.mocked(prisma.sightingPhoto.count).mockResolvedValue(0);
+    vi.mocked(prisma.sightingPhoto.create).mockRejectedValue(new Error('database unavailable'));
+    const remove = vi.fn().mockResolvedValue(undefined);
+    const put = vi.fn()
+      .mockResolvedValueOnce({ key: 'sightings/s1/large-1024.webp', size: 10 })
+      .mockResolvedValueOnce({ key: 'sightings/s1/thumb-256.webp', size: 5 });
+    storageOverride = { put, remove, publicUrl: vi.fn() };
+
+    const form = new FormData();
+    form.append('file', await buildPng(), { filename: 'orca.png', contentType: 'image/png' });
+    const response = await app.inject({
+      method: 'POST', url: '/api/v1/sightings/s1/photos', payload: form, headers: form.getHeaders(),
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(remove).toHaveBeenCalledTimes(2);
+    expect(remove).toHaveBeenCalledWith('sightings/s1/large-1024.webp');
+    expect(remove).toHaveBeenCalledWith('sightings/s1/thumb-256.webp');
+  });
+
+  it('strips source metadata from both persisted WebP variants', async () => {
+    vi.mocked(prisma.sighting.findUnique).mockResolvedValue(recentPendingSighting() as never);
+    vi.mocked(prisma.sightingPhoto.count).mockResolvedValue(0);
+    vi.mocked(prisma.sightingPhoto.create).mockResolvedValue({
+      id: 'photo-1', orderIndex: 0, thumbnailUrl: 'thumb', url: 'large',
+    } as never);
+    const put = vi.fn()
+      .mockResolvedValueOnce({ key: 'sightings/s1/large-1024.webp', size: 10 })
+      .mockResolvedValueOnce({ key: 'sightings/s1/thumb-256.webp', size: 5 });
+    storageOverride = { put, remove: vi.fn(), publicUrl: vi.fn() };
+    const source = await sharp(await buildPng()).withMetadata({ orientation: 6 }).png().toBuffer();
+    const form = new FormData();
+    form.append('file', source, { filename: 'orca.png', contentType: 'image/png' });
+
+    const response = await app.inject({
+      method: 'POST', url: '/api/v1/sightings/s1/photos', payload: form, headers: form.getHeaders(),
+    });
+    expect(response.statusCode).toBe(201);
+    for (const call of put.mock.calls) {
+      const metadata = await sharp(call[0].body as Buffer).metadata();
+      expect(metadata.exif).toBeUndefined();
+      expect(metadata.icc).toBeUndefined();
+      expect(metadata.xmp).toBeUndefined();
+    }
+  });
+
+  it('rejects images over the decoded pixel limit before object storage', async () => {
+    vi.mocked(prisma.sighting.findUnique).mockResolvedValue(recentPendingSighting() as never);
+    vi.mocked(prisma.sightingPhoto.count).mockResolvedValue(0);
+    const put = vi.fn();
+    storageOverride = { put, remove: vi.fn(), publicUrl: vi.fn() };
+    const oversizedPixels = await sharp({
+      create: {
+        width: 8_000,
+        height: 5_001,
+        channels: 3,
+        background: { r: 1, g: 2, b: 3 },
+      },
+    }).png().toBuffer();
+    const form = new FormData();
+    form.append('file', oversizedPixels, { filename: 'huge.png', contentType: 'image/png' });
+
+    const response = await app.inject({
+      method: 'POST', url: '/api/v1/sightings/s1/photos', payload: form, headers: form.getHeaders(),
+    });
+    expect(response.statusCode).toBe(400);
+    expect(put).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /api/v1/media/:photoId', () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    uploadsRoot = await mkdtemp(path.join(tmpdir(), 'fluke-media-test-'));
+    app = await buildApp({ silent: true });
+    await app.ready();
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await rm(uploadsRoot, { recursive: true, force: true });
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resolveOptionalObserver.mockResolvedValue(null);
+    storageOverride = {
+      put: vi.fn(),
+      publicUrl: vi.fn(),
+      remove: vi.fn(),
+      signedReadUrl: vi.fn().mockResolvedValue('https://signed.example/photo'),
+    };
+  });
+
+  it('redirects anonymous readers to a short-lived URL for approved media', async () => {
+    vi.mocked(prisma.sightingPhoto.findUnique).mockResolvedValue({
+      id: 'photo-1',
+      storageKey: 'sightings/s1/photo-1024.webp',
+      sighting: { observerUserId: 'observer-1', status: 'APPROVED' },
+    } as never);
+    const response = await app.inject({ method: 'GET', url: '/api/v1/media/photo-1' });
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe('https://signed.example/photo');
+  });
+
+  it('returns 403 when a different observer requests pending media', async () => {
+    resolveOptionalObserver.mockResolvedValue({ id: 'observer-2', role: 'OBSERVER' });
+    vi.mocked(prisma.sightingPhoto.findUnique).mockResolvedValue({
+      id: 'photo-1',
+      storageKey: 'sightings/s1/photo-1024.webp',
+      sighting: { observerUserId: 'observer-1', status: 'PENDING' },
+    } as never);
+    const response = await app.inject({ method: 'GET', url: '/api/v1/media/photo-1' });
+    expect(response.statusCode).toBe(403);
+    expect(storageOverride?.signedReadUrl).not.toHaveBeenCalled();
+  });
+
+  it('uses the derived private thumbnail key for an owning observer', async () => {
+    resolveOptionalObserver.mockResolvedValue({ id: 'observer-1', role: 'OBSERVER' });
+    vi.mocked(prisma.sightingPhoto.findUnique).mockResolvedValue({
+      id: 'photo-1',
+      storageKey: 'sightings/s1/photo-1024.webp',
+      sighting: { observerUserId: 'observer-1', status: 'PENDING' },
+    } as never);
+    const response = await app.inject({
+      method: 'GET', url: '/api/v1/media/photo-1?variant=thumbnail',
+    });
+    expect(response.statusCode).toBe(302);
+    expect(storageOverride?.signedReadUrl).toHaveBeenCalledWith('sightings/s1/photo-256.webp');
   });
 });

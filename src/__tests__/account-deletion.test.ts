@@ -39,8 +39,8 @@ describe('deleteObserverAccount', () => {
     vi.mocked(prisma.user.findUnique).mockResolvedValue(observer as never);
     vi.mocked(tokenCrypto.decryptToken).mockReturnValue('stored-refresh-token');
     vi.mocked(prisma.sightingPhoto.findMany).mockResolvedValue([
-      { storageKey: 'sightings/pending/photo.webp' },
-      { storageKey: 'sightings/rejected/photo.webp' },
+      { storageKey: 'sightings/pending/photo-1024.webp' },
+      { storageKey: 'sightings/rejected/photo-1024.webp' },
     ] as never);
     vi.mocked(prisma.$transaction).mockImplementation(async (callback) => (
       callback(prisma as never)
@@ -108,7 +108,11 @@ describe('deleteObserverAccount', () => {
         appleSub: observer.appleSub,
       },
     });
-    expect(storage.remove).toHaveBeenCalledTimes(2);
+    expect(storage.remove).toHaveBeenCalledTimes(4);
+    expect(storage.remove).toHaveBeenCalledWith('sightings/pending/photo-1024.webp');
+    expect(storage.remove).toHaveBeenCalledWith('sightings/pending/photo-256.webp');
+    expect(storage.remove).toHaveBeenCalledWith('sightings/rejected/photo-1024.webp');
+    expect(storage.remove).toHaveBeenCalledWith('sightings/rejected/photo-256.webp');
   });
 
   it('does not mutate data when stored account identity is missing or mismatched', async () => {
@@ -150,6 +154,9 @@ describe('deleteObserverAccount', () => {
 
   it('retries object cleanup after commit and records bounded terminal failures', async () => {
     const { deleteObserverAccount } = await import('../services/account-deletion.js');
+    vi.mocked(prisma.sightingPhoto.findMany).mockResolvedValue([
+      { storageKey: 'sightings/pending/photo-1024.webp' },
+    ] as never);
     vi.mocked(storage.remove)
       .mockRejectedValueOnce(new Error('temporary'))
       .mockResolvedValueOnce(undefined)
@@ -171,7 +178,7 @@ describe('deleteObserverAccount', () => {
     expect(recordCleanupFailure).toHaveBeenCalledOnce();
     expect(recordCleanupFailure).toHaveBeenCalledWith(expect.objectContaining({
       attempts: 3,
-      storageKey: 'sightings/rejected/photo.webp',
+      storageKey: 'sightings/pending/photo-256.webp',
     }));
   });
 });

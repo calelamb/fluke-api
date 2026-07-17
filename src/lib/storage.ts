@@ -1,5 +1,5 @@
 // Storage abstraction. Photo bytes go through a backend interface so we can
-// run local-disk in dev today and switch to R2 (or any S3-compatible store)
+// run local-disk in development/test and private S3-compatible storage
 // in production by changing STORAGE_BACKEND, without touching call sites.
 //
 // See docs/v1-plan.md § M-V1-1 for the rationale (path c).
@@ -9,19 +9,18 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
 import { env } from '../env.js';
+import { S3StorageBackend as S3BackendConstructor } from './s3-storage.js';
 
 export interface StoredObject {
   /** Backend-specific identifier; for local disk, this is the relative path. */
   key: string;
-  /** A URL the browser can hit to fetch the object. */
-  url: string;
   /** Bytes written. */
   size: number;
 }
 
 export interface StorageBackend {
   /**
-   * Persist a buffer or stream and return a stable key + a fetchable URL.
+   * Persist a buffer or stream and return a stable private key and byte count.
    * The key includes any subdirectory layout the backend wants to impose
    * (e.g. `sightings/abc/large.webp`). Caller decides the prefix.
    */
@@ -37,6 +36,9 @@ export interface StorageBackend {
 
   /** Resolve a stored key to a URL the browser can fetch. */
   publicUrl(key: string): string;
+
+  /** Resolve a private key to a short-lived URL when supported. */
+  signedReadUrl?(key: string): Promise<string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -76,8 +78,8 @@ export class LocalDiskBackend implements StorageBackend {
     contentType: string;
     body: Buffer | Readable;
   }): Promise<StoredObject> {
-    const safePrefix = sanitizePrefix(prefix);
-    const safeFilename = sanitizeFilename(filename);
+    const safePrefix = sanitizeStoragePrefix(prefix);
+    const safeFilename = sanitizeStorageFilename(filename);
     const targetDir = path.join(this.rootDir, safePrefix);
     await mkdir(targetDir, { recursive: true });
 
@@ -88,13 +90,12 @@ export class LocalDiskBackend implements StorageBackend {
     const key = `${safePrefix}/${safeFilename}`;
     return {
       key,
-      url: this.publicUrl(key),
       size: buffer.byteLength,
     };
   }
 
   async remove(key: string): Promise<void> {
-    const target = path.join(this.rootDir, key);
+    const target = path.join(this.rootDir, sanitizeStorageKey(key));
     try {
       await import('node:fs/promises').then((fs) => fs.unlink(target));
     } catch (error) {
@@ -111,42 +112,7 @@ export class LocalDiskBackend implements StorageBackend {
   }
 
   publicUrl(key: string): string {
-    return `${this.apiOrigin}${this.urlPrefix}/${key}`;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// R2Backend (stub)
-// ---------------------------------------------------------------------------
-
-export interface R2Options {
-  bucket: string;
-  endpoint: string;
-  accessKeyId: string;
-  secretAccessKey: string;
-  publicHost: string;
-}
-
-/**
- * Cloudflare R2 backend stub. Kept as a placeholder so the env validator
- * can route STORAGE_BACKEND=r2 without breaking the API; the actual S3
- * client wiring lands when credentials exist (see docs/v1-plan.md).
- */
-export class R2Backend implements StorageBackend {
-  constructor(private readonly options: R2Options) {}
-
-  async put(): Promise<StoredObject> {
-    throw new Error(
-      'R2Backend is a stub. Wire @aws-sdk/client-s3 against options before enabling STORAGE_BACKEND=r2.',
-    );
-  }
-
-  async remove(): Promise<void> {
-    throw new Error('R2Backend is a stub.');
-  }
-
-  publicUrl(key: string): string {
-    return `${this.options.publicHost.replace(/\/$/, '')}/${key}`;
+    return `${this.apiOrigin}${this.urlPrefix}/${sanitizeStorageKey(key)}`;
   }
 }
 
@@ -172,20 +138,20 @@ export function buildPhotoFilename(originalName: string, body: Buffer): string {
  * (e.g. `sightings/abc`). Rejects any path-traversal patterns; throws if the
  * input is unsafe rather than silently mangling it.
  */
-function sanitizePrefix(value: string): string {
+export function sanitizeStoragePrefix(value: string): string {
   if (value.length === 0) throw new Error('Invalid storage segment: empty prefix');
-  if (value.startsWith('/')) throw new Error(`Invalid storage segment: ${value}`);
-  if (value.includes('..')) throw new Error(`Invalid storage segment: ${value}`);
+  if (value.startsWith('/')) throw new Error('Invalid storage segment');
+  if (value.includes('..')) throw new Error('Invalid storage segment');
 
   const segments = value.split('/').filter(Boolean);
-  if (segments.length === 0) throw new Error(`Invalid storage segment: ${value}`);
+  if (segments.length === 0) throw new Error('Invalid storage segment');
 
   for (const segment of segments) {
     if (segment === '..' || segment.startsWith('.')) {
-      throw new Error(`Invalid storage segment: ${value}`);
+      throw new Error('Invalid storage segment');
     }
     if (!/^[a-zA-Z0-9._-]+$/.test(segment)) {
-      throw new Error(`Invalid storage segment: ${value}`);
+      throw new Error('Invalid storage segment');
     }
   }
   return segments.join('/');
@@ -195,15 +161,33 @@ function sanitizePrefix(value: string): string {
  * Sanitize a storage filename. Must be a single segment — no `/`, no `..`,
  * no leading dot. Throws on anything unsafe.
  */
-function sanitizeFilename(value: string): string {
+export function sanitizeStorageFilename(value: string): string {
   if (value.length === 0) throw new Error('Invalid storage segment: empty filename');
-  if (value.includes('/')) throw new Error(`Invalid storage segment: ${value}`);
-  if (value.includes('..')) throw new Error(`Invalid storage segment: ${value}`);
-  if (value.startsWith('.')) throw new Error(`Invalid storage segment: ${value}`);
+  if (value.includes('/')) throw new Error('Invalid storage segment');
+  if (value.includes('..')) throw new Error('Invalid storage segment');
+  if (value.startsWith('.')) throw new Error('Invalid storage segment');
   if (!/^[a-zA-Z0-9._-]+$/.test(value)) {
-    throw new Error(`Invalid storage segment: ${value}`);
+    throw new Error('Invalid storage segment');
   }
   return value;
+}
+
+export function sanitizeStorageKey(value: string): string {
+  if (value.length === 0 || Buffer.byteLength(value, 'utf8') > 1_024) {
+    throw new Error('Invalid storage key');
+  }
+  const segments = value.split('/');
+  if (segments.length < 2) throw new Error('Invalid storage key');
+  const filename = sanitizeStorageFilename(segments.at(-1) ?? '');
+  const prefix = sanitizeStoragePrefix(segments.slice(0, -1).join('/'));
+  return `${prefix}/${filename}`;
+}
+
+export function relatedSightingPhotoKeys(largeKey: string): readonly string[] {
+  const safeKey = sanitizeStorageKey(largeKey);
+  if (!safeKey.endsWith('-1024.webp')) return Object.freeze([safeKey]);
+  const stem = safeKey.slice(0, -'-1024.webp'.length);
+  return Object.freeze([safeKey, `${stem}-256.webp`]);
 }
 
 async function streamToBuffer(stream: Readable): Promise<Buffer> {
@@ -228,20 +212,55 @@ export function resolveUploadsDir(): string {
 
 let cached: StorageBackend | null = null;
 
+interface LocalStorageFactoryConfig {
+  readonly apiOrigin: string;
+  readonly backend: 'local';
+  readonly nodeEnv: 'development' | 'production' | 'test';
+  readonly rootDir: string;
+}
+
+interface S3StorageFactoryConfig {
+  readonly backend: 's3';
+  readonly s3: import('./s3-storage.js').S3StorageConfig;
+}
+
+export type StorageFactoryConfig = LocalStorageFactoryConfig | S3StorageFactoryConfig;
+
+export function createStorageBackend(config: StorageFactoryConfig): StorageBackend {
+  if (config.backend === 'local') {
+    if (config.nodeEnv === 'production') {
+      throw new Error('Production cannot use local object storage');
+    }
+    return new LocalDiskBackend({
+      apiOrigin: config.apiOrigin,
+      rootDir: config.rootDir,
+    });
+  }
+  // Dynamic import is not usable in this synchronous factory, so construction
+  // is delegated to the cached async-free module binding below.
+  return new S3BackendConstructor(config.s3);
+}
+
 export function getStorageBackend(): StorageBackend {
   if (cached) return cached;
-  if (env.STORAGE_BACKEND === 'r2') {
-    cached = new R2Backend({
-      bucket: env.R2_BUCKET!,
-      endpoint: env.R2_ENDPOINT!,
-      accessKeyId: env.R2_ACCESS_KEY_ID!,
-      secretAccessKey: env.R2_SECRET_ACCESS_KEY!,
-      publicHost: env.R2_PUBLIC_HOST!,
+  if (env.STORAGE_BACKEND === 's3') {
+    cached = createStorageBackend({
+      backend: 's3',
+      s3: {
+        accessKeyId: env.OBJECT_STORAGE_ACCESS_KEY_ID!,
+        bucket: env.OBJECT_STORAGE_BUCKET!,
+        endpoint: env.OBJECT_STORAGE_ENDPOINT!,
+        forcePathStyle: env.OBJECT_STORAGE_FORCE_PATH_STYLE!,
+        region: env.OBJECT_STORAGE_REGION!,
+        secretAccessKey: env.OBJECT_STORAGE_SECRET_ACCESS_KEY!,
+      },
     });
   } else {
-    cached = new LocalDiskBackend({
-      rootDir: resolveUploadsDir(),
+    cached = createStorageBackend({
       apiOrigin: env.API_PUBLIC_ORIGIN,
+      backend: 'local',
+      nodeEnv: env.NODE_ENV,
+      rootDir: resolveUploadsDir(),
     });
   }
   return cached;

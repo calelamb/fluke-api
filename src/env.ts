@@ -49,10 +49,9 @@ const envSchema = z
     ENABLE_ACCOUNTS: featureFlag,
     ENABLE_IDENTIFY: featureFlag,
 
-    // Photo storage backend. 'local' writes to apps/api/uploads/ and the API
-    // serves them statically; 'r2' is reserved for the R2 adapter (stubbed
-    // in src/lib/storage.ts) and requires the R2_* env vars below.
-    STORAGE_BACKEND: z.enum(['local', 'r2']).default('local'),
+    // Local storage is restricted to development/test. Production mutation
+    // processes must select the private S3-compatible adapter.
+    STORAGE_BACKEND: z.enum(['local', 's3']).default('local'),
     UPLOADS_DIR: z.string().min(1).default('uploads'),
     /**
      * Absolute origin the API is reachable at, used to build absolute photo
@@ -62,21 +61,42 @@ const envSchema = z
     API_PUBLIC_ORIGIN: z.string().url().default(DEVELOPMENT_API_ORIGIN),
     IDENTIFIER_SERVICE_URL: z.string().url().default('http://localhost:4100'),
 
-    R2_BUCKET: z.string().optional(),
-    R2_ENDPOINT: z.string().url().optional(),
-    R2_ACCESS_KEY_ID: z.string().optional(),
-    R2_SECRET_ACCESS_KEY: z.string().optional(),
-    R2_PUBLIC_HOST: z.string().url().optional(),
+    OBJECT_STORAGE_BUCKET: z.string().min(3).max(63).optional(),
+    OBJECT_STORAGE_REGION: z.string().min(1).max(64).optional(),
+    OBJECT_STORAGE_ENDPOINT: z.string().url().optional(),
+    OBJECT_STORAGE_ACCESS_KEY_ID: z.string().min(1).max(256).optional(),
+    OBJECT_STORAGE_SECRET_ACCESS_KEY: z.string().min(1).max(1_024).optional(),
+    OBJECT_STORAGE_FORCE_PATH_STYLE: z
+      .enum(['true', 'false'])
+      .transform((value) => value === 'true')
+      .optional(),
   })
   .superRefine((value, ctx) => {
-    if (value.STORAGE_BACKEND === 'r2') {
-      const required = ['R2_BUCKET', 'R2_ENDPOINT', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_PUBLIC_HOST'] as const;
+    if (value.STORAGE_BACKEND === 's3') {
+      const required = [
+        'OBJECT_STORAGE_BUCKET',
+        'OBJECT_STORAGE_REGION',
+        'OBJECT_STORAGE_ENDPOINT',
+        'OBJECT_STORAGE_ACCESS_KEY_ID',
+        'OBJECT_STORAGE_SECRET_ACCESS_KEY',
+        'OBJECT_STORAGE_FORCE_PATH_STYLE',
+      ] as const;
       for (const key of required) {
-        if (!value[key]) {
+        if (value[key] === undefined) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             path: [key],
-            message: `STORAGE_BACKEND=r2 requires ${key}`,
+            message: `STORAGE_BACKEND=s3 requires ${key}`,
+          });
+        }
+      }
+      if (value.OBJECT_STORAGE_ENDPOINT) {
+        const issue = productionOriginIssue(value.OBJECT_STORAGE_ENDPOINT);
+        if (issue) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['OBJECT_STORAGE_ENDPOINT'],
+            message: `object storage endpoint ${issue}`,
           });
         }
       }

@@ -1,9 +1,13 @@
 import type { AdminClaims } from '../lib/auth.js';
 import type { FastifyInstance, FastifyPluginAsync, FastifyRequest } from 'fastify';
+import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { prisma } from '../db.js';
+import { env } from '../env.js';
 import { requireAdmin } from '../lib/auth.js';
+import { resolveOptionalObserver } from '../lib/observer-auth.js';
 import { buildPhotoFilename, getStorageBackend } from '../lib/storage.js';
+import type { StorageBackend, StoredObject } from '../lib/storage.js';
 import {
   PHOTO_UPLOAD_TOKEN_TYPE,
   type PhotoUploadTokenPayload,
@@ -14,6 +18,52 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
 const ACCEPTED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const PUBLIC_UPLOAD_WINDOW_MS = 30 * 60 * 1000; // 30 minutes after sighting create
 const PHOTO_UPLOAD_TOKEN_HEADER = 'x-photo-upload-token';
+const MAX_INPUT_PIXELS = 40_000_000;
+
+interface StoredPhotoPair {
+  readonly large: StoredObject;
+  readonly thumbnail: StoredObject;
+}
+
+async function cleanupObjects(storage: StorageBackend, keys: readonly string[]): Promise<void> {
+  await Promise.allSettled(keys.map((key) => storage.remove(key)));
+}
+
+export async function storePhotoPair(input: {
+  readonly createPhoto: (pair: StoredPhotoPair) => Promise<unknown>;
+  readonly large: Parameters<StorageBackend['put']>[0];
+  readonly storage: StorageBackend;
+  readonly thumbnail: Parameters<StorageBackend['put']>[0];
+}): Promise<StoredPhotoPair> {
+  const large = await input.storage.put(input.large);
+  let thumbnail: StoredObject;
+  try {
+    thumbnail = await input.storage.put(input.thumbnail);
+  } catch (error: unknown) {
+    await cleanupObjects(input.storage, [large.key]);
+    throw error;
+  }
+
+  const pair = Object.freeze({ large, thumbnail });
+  try {
+    await input.createPhoto(pair);
+    return pair;
+  } catch (error: unknown) {
+    await cleanupObjects(input.storage, [large.key, thumbnail.key]);
+    throw error;
+  }
+}
+
+function mediaUrl(photoId: string, thumbnail = false): string {
+  const origin = env.API_PUBLIC_ORIGIN.replace(/\/$/u, '');
+  const query = thumbnail ? '?variant=thumbnail' : '';
+  return `${origin}/api/v1/media/${photoId}${query}`;
+}
+
+function thumbnailKey(largeKey: string): string {
+  if (!largeKey.endsWith('-1024.webp')) throw new Error('Invalid sighting photo storage key');
+  return `${largeKey.slice(0, -'-1024.webp'.length)}-256.webp`;
+}
 
 async function getOptionalAdmin(req: FastifyRequest): Promise<AdminClaims | null> {
   try {
@@ -141,7 +191,10 @@ const sightingPhotosRoutes: FastifyPluginAsync<SightingPhotosRouteOptions> = asy
       let largeBuffer: Buffer;
       let thumbBuffer: Buffer;
       try {
-        const pipeline = sharp(buffer).rotate(); // honor EXIF orientation
+        const pipeline = sharp(buffer, {
+          failOn: 'error',
+          limitInputPixels: MAX_INPUT_PIXELS,
+        }).rotate();
         largeBuffer = await pipeline
           .clone()
           .resize({ width: 1024, withoutEnlargement: true })
@@ -164,20 +217,26 @@ const sightingPhotosRoutes: FastifyPluginAsync<SightingPhotosRouteOptions> = asy
       const largeName = `${stem}-1024.webp`;
       const thumbName = `${stem}-256.webp`;
 
-      const [largeStored, thumbStored] = await Promise.all([
-        storage.put({ prefix, filename: largeName, contentType: 'image/webp', body: largeBuffer }),
-        storage.put({ prefix, filename: thumbName, contentType: 'image/webp', body: thumbBuffer }),
-      ]);
-
-      const photo = await prisma.sightingPhoto.create({
-        data: {
-          sightingId,
-          storageKey: largeStored.key,
-          url: largeStored.url,
-          thumbnailUrl: thumbStored.url,
-          orderIndex: existingCount,
+      const photoId = randomUUID();
+      let photo: Awaited<ReturnType<typeof prisma.sightingPhoto.create>> | undefined;
+      await storePhotoPair({
+        createPhoto: async ({ large }) => {
+          photo = await prisma.sightingPhoto.create({
+            data: {
+              id: photoId,
+              sightingId,
+              storageKey: large.key,
+              url: mediaUrl(photoId),
+              thumbnailUrl: mediaUrl(photoId, true),
+              orderIndex: existingCount,
+            },
+          });
         },
+        large: { prefix, filename: largeName, contentType: 'image/webp', body: largeBuffer },
+        storage,
+        thumbnail: { prefix, filename: thumbName, contentType: 'image/webp', body: thumbBuffer },
       });
+      if (photo === undefined) throw new Error('Photo persistence did not complete');
 
       // Audit log only for admin uploads — public submissions are tracked via
       // the Sighting row itself; the SightingPhoto row carries its provenance.
@@ -190,8 +249,6 @@ const sightingPhotosRoutes: FastifyPluginAsync<SightingPhotosRouteOptions> = asy
             entityId: photo.id,
             metadata: {
               sightingId,
-              largeKey: largeStored.key,
-              thumbKey: thumbStored.key,
               sizeBytes: buffer.byteLength,
             },
           },
@@ -204,6 +261,39 @@ const sightingPhotosRoutes: FastifyPluginAsync<SightingPhotosRouteOptions> = asy
         thumbnailUrl: photo.thumbnailUrl,
         orderIndex: photo.orderIndex,
       });
+    },
+  );
+
+  fastify.get<{ Params: { photoId: string }; Querystring: { variant?: string } }>(
+    '/media/:photoId',
+    async (request, reply) => {
+      if (request.query.variant !== undefined && request.query.variant !== 'thumbnail') {
+        return reply.code(400).send({ error: 'Invalid media variant' });
+      }
+      const admin = await getOptionalAdmin(request);
+      const observer = admin ? null : await resolveOptionalObserver(request, reply);
+      const photo = await prisma.sightingPhoto.findUnique({
+        where: { id: request.params.photoId },
+        select: {
+          storageKey: true,
+          sighting: { select: { observerUserId: true, status: true } },
+        },
+      });
+      if (photo === null) return reply.code(404).send({ error: 'Media not found' });
+
+      const mayRead = photo.sighting.status === 'APPROVED'
+        || admin !== null
+        || (observer !== null && photo.sighting.observerUserId === observer.id);
+      if (!mayRead) return reply.code(403).send({ error: 'Media is private' });
+
+      const storage = getStorageBackend();
+      const key = request.query.variant === 'thumbnail'
+        ? thumbnailKey(photo.storageKey)
+        : photo.storageKey;
+      const location = storage.signedReadUrl
+        ? await storage.signedReadUrl(key)
+        : storage.publicUrl(key);
+      return reply.redirect(location);
     },
   );
 

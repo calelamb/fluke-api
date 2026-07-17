@@ -23,6 +23,32 @@ const SAFE_PRODUCTION_ENV: NodeJS.ProcessEnv = {
 };
 
 describe('Release A environment configuration', () => {
+  it('requires every private S3 value when the S3 backend is selected', () => {
+    expect(() => parseEnv({
+      ...REQUIRED_ENV,
+      NODE_ENV: 'test',
+      STORAGE_BACKEND: 's3',
+    })).toThrow(/OBJECT_STORAGE_BUCKET/);
+  });
+
+  it('parses a complete private S3 configuration', () => {
+    expect(parseEnv({
+      ...REQUIRED_ENV,
+      NODE_ENV: 'test',
+      STORAGE_BACKEND: 's3',
+      OBJECT_STORAGE_ACCESS_KEY_ID: 'access',
+      OBJECT_STORAGE_BUCKET: 'fluke-private',
+      OBJECT_STORAGE_ENDPOINT: 'https://objects.example.com',
+      OBJECT_STORAGE_FORCE_PATH_STYLE: 'true',
+      OBJECT_STORAGE_REGION: 'us-west-2',
+      OBJECT_STORAGE_SECRET_ACCESS_KEY: 'secret',
+    })).toMatchObject({
+      OBJECT_STORAGE_BUCKET: 'fluke-private',
+      OBJECT_STORAGE_FORCE_PATH_STYLE: true,
+      STORAGE_BACKEND: 's3',
+    });
+  });
+
   it('defaults every Release B capability to false', () => {
     const parsed = parseEnv({ ...REQUIRED_ENV, NODE_ENV: 'test' });
 
