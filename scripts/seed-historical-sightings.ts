@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { assertSyntheticHistoryAllowed } from '../src/ops/synthetic-history-guard.js';
 
 const prisma = new PrismaClient();
 
@@ -44,6 +45,8 @@ function seasonalWeight(month: number, pod: 'J' | 'K' | 'L' | 'BIGGS'): number {
 }
 
 async function main() {
+  assertSyntheticHistoryAllowed(process.env);
+
   const start = Date.now();
   console.log('seed-historical-sightings: starting...');
 
