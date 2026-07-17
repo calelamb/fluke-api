@@ -91,6 +91,21 @@ describe('release configuration', () => {
     expect(packageJson.scripts?.['predict:compute']).toBeUndefined();
   });
 
+  it('documents seed operations that exist in the pruned runtime image', () => {
+    const packageJson = JSON.parse(readRepositoryFile('package.json')) as {
+      scripts?: Record<string, string>;
+    };
+    const deployment = readRepositoryFile('docs/deployment.md');
+    const restore = readRepositoryFile('docs/restore.md');
+
+    expect(packageJson.scripts?.['db:seed:runtime']).toBe('node dist/prisma/seed.js');
+    expect(deployment).toContain('npm run db:seed:runtime');
+    expect(deployment).toContain('npm run db:verify-seed:runtime');
+    expect(restore).toContain('npm run db:verify-seed:runtime');
+    expect(deployment).not.toContain('`pnpm db:seed`');
+    expect(restore).not.toContain('`pnpm db:');
+  });
+
   it.each([
     ['railway.acartia.json', 'npm run jobs:acartia:runtime', '15 */6 * * *'],
     ['railway.gbif.json', 'npm run jobs:gbif:runtime', '15 2 * * 0'],

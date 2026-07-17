@@ -15,6 +15,7 @@
     "db:migrate:deploy": "prisma migrate deploy",
     "db:migrate:status": "prisma migrate status",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed:runtime": "node dist/prisma/seed.js",
     "db:verify-seed": "tsx scripts/verify-seed.ts",
     "db:verify-seed:runtime": "node dist/scripts/verify-seed.js",
     "dev": "tsx watch src/index.ts",

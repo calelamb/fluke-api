@@ -4,34 +4,73 @@ import { jobDefinition } from '../src/jobs/job-catalog.js';
 import { JOB_EXIT } from '../src/jobs/job-runner.js';
 import { runScheduledJob } from '../src/jobs/run-scheduled-job.js';
 
-export async function runJobCli(value: string | undefined): Promise<number> {
-  let definition: ReturnType<typeof jobDefinition>;
-  try {
-    definition = jobDefinition(value);
-  } catch {
-    process.stderr.write('{"level":"error","code":"INVALID_JOB_NAME"}\n');
-    return JOB_EXIT.CONFIG;
-  }
+interface JobCliDependencies {
+  readonly createClient: () => PrismaClient;
+  readonly runScheduledJob: typeof runScheduledJob;
+  readonly writeStderr: (message: string) => void;
+  readonly writeStdout: (message: string) => void;
+}
 
-  const client = new PrismaClient();
+const DEFAULT_DEPENDENCIES: JobCliDependencies = Object.freeze({
+  createClient: () => new PrismaClient(),
+  runScheduledJob,
+  writeStderr: (message: string) => process.stderr.write(message),
+  writeStdout: (message: string) => process.stdout.write(message),
+});
+
+async function disconnect(client: PrismaClient, dependencies: JobCliDependencies): Promise<boolean> {
   try {
-    const result = await runScheduledJob(definition.name, client);
-    process.stdout.write(`${JSON.stringify({
-      exitCode: result.exitCode,
-      job: definition.name,
-      summary: result.summary ?? null,
-    })}\n`);
-    return result.exitCode;
+    await client.$disconnect();
+    return true;
   } catch {
-    process.stderr.write(`${JSON.stringify({
+    dependencies.writeStderr('{"level":"error","code":"JOB_DISCONNECT_FAILED"}\n');
+    return false;
+  }
+}
+
+async function executeJob(
+  definition: ReturnType<typeof jobDefinition>,
+  client: PrismaClient,
+  dependencies: JobCliDependencies,
+): Promise<Readonly<{ exitCode: number; summary?: Readonly<Record<string, unknown>> }>> {
+  try {
+    return await dependencies.runScheduledJob(definition.name, client);
+  } catch {
+    dependencies.writeStderr(`${JSON.stringify({
       code: 'JOB_RUNTIME_FAILED',
       job: definition.name,
       level: 'error',
     })}\n`);
-    return JOB_EXIT.FAILURE;
-  } finally {
-    await client.$disconnect();
+    return { exitCode: JOB_EXIT.FAILURE };
   }
+}
+
+export async function runJobCli(
+  value: string | undefined,
+  dependencies: JobCliDependencies = DEFAULT_DEPENDENCIES,
+): Promise<number> {
+  const definition = (() => {
+    try {
+      return jobDefinition(value);
+    } catch {
+      return null;
+    }
+  })();
+  if (!definition) {
+    dependencies.writeStderr('{"level":"error","code":"INVALID_JOB_NAME"}\n');
+    return JOB_EXIT.CONFIG;
+  }
+
+  const client = dependencies.createClient();
+  const execution = await executeJob(definition, client, dependencies);
+  const disconnected = await disconnect(client, dependencies);
+  const exitCode = disconnected ? execution.exitCode : JOB_EXIT.FAILURE;
+  dependencies.writeStdout(`${JSON.stringify({
+    exitCode,
+    job: definition.name,
+    summary: disconnected ? execution.summary ?? null : null,
+  })}\n`);
+  return exitCode;
 }
 
 const invokedPath = process.argv[1] ? pathToFileURL(process.argv[1]).href : '';

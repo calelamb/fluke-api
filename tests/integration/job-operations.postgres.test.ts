@@ -67,6 +67,8 @@ describe.runIf(postgresEnabled)('job operations against PostgreSQL', () => {
     expect(replacement).not.toBeNull();
     if (!replacement) return;
 
+    expect(replacement.fence).toBeGreaterThan(stale.fence);
+
     await expect(store.finalizeSuccess(stale, { processed: 1 })).resolves.toBe(false);
     await expect(prisma.jobRunEvent.count({
       where: { event: 'SUCCEEDED', runId: staleRunId },

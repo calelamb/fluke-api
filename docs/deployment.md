@@ -11,7 +11,7 @@
 1. Deploy the API service with `railway.json`. Its pre-deploy command applies committed Prisma migrations before the new image starts.
 2. Require `/api/v1/ready` to return `200`; it verifies database access and this image's required schema.
 3. Configure three services from the same commit and environment, selecting `railway.acartia.json`, `railway.gbif.json`, and `railway.predictions.json` as their config files.
-4. Run `pnpm db:seed` once, then `pnpm db:verify-seed`. The seed is idempotent and the verifier must report all canonical records.
+4. In a one-off process using the deployed production image, run `npm run db:seed:runtime` once, then `npm run db:verify-seed:runtime`. The seed is idempotent and the verifier must report all canonical records.
 5. Probe the public `/api/v1/health` and `/api/v1/ready` endpoints and exercise one public catalog request.
 6. Inspect the latest job run events after each cron's first execution.
 

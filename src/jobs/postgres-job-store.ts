@@ -114,14 +114,14 @@ export class PostgresJobLeaseStore implements JobLeaseStore {
   }
 
   async release(lease: JobLease): Promise<void> {
-    await this.#client.jobLease.deleteMany({
-      where: {
-        fence: lease.fence,
-        jobName: lease.jobName,
-        ownerToken: lease.ownerToken,
-        runId: lease.runId,
-      },
-    });
+    await this.#client.$executeRaw`
+      UPDATE "job_leases"
+      SET "lease_expires_at" = CURRENT_TIMESTAMP
+      WHERE "job_name" = ${lease.jobName}
+        AND "run_id" = ${lease.runId}
+        AND "owner_token" = ${lease.ownerToken}
+        AND "fence" = ${lease.fence}
+    `;
   }
 
   async runFenced<T>(
