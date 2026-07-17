@@ -43,9 +43,15 @@ Any public bucket access, unauthorized signed media, missing variant, duplicate 
 
 ## Deletion and Apple revocation
 
-On a physical TestFlight device, begin the disposable account check with a fresh authorization code, fresh identityToken, and fresh nonce from a new Sign in with Apple authorization. Require nonce/identity-token verification to produce a verified Apple subject, require the authorization-code token exchange to succeed, and verify that subject matches the observer's stored Apple subject before creating any deletion fixture. Never record the credential values.
+This proof requires two physical Sign in with Apple authorizations whose credentials must be distinct and never recorded:
 
-Create a disposable Observer A pending submission/photo in that fresh session, then perform `DELETE /api/v1/auth/account` through the app with valid CSRF. Require Apple revocation of the exchanged authorization to succeed, client cookies/local observer state to clear, subsequent `/auth/me` to return `401`, and pending/rejected data plus media to be deleted. If testing an approved fixture, require the scientific record to remain only with observer identity irreversibly cleared.
+1. **Authorization A:** obtain a fresh authorization code, fresh identityToken, and fresh nonce on the physical TestFlight device. Send them once with POST `/api/v1/auth/apple` to establish or re-establish the signed observer session. Require its authorization code to be exchanged exactly once in the token exchange, verification to produce the verified Apple subject, subject continuity to pass, and its refresh token to be stored encrypted.
+2. Create a disposable Observer A pending submission/photo in the session from Authorization A.
+3. **Authorization B:** immediately before `DELETE /api/v1/auth/account`, obtain a second unused authorization code, identity token, and nonce from a new physical Apple authorization. Authorization B must be distinct from Authorization A and must not be sent to the sign-in endpoint.
+4. Send Authorization B's `authorizationCode`, `identityToken`, and `nonce` in the DELETE request body with the established session cookie and valid CSRF. Require DELETE to verify nonce/identity subject continuity and exchange Authorization B's code exactly once as part of the DELETE request.
+5. Before any database deletion, require successful Apple revocation of the stored refresh token from Authorization A and the newly exchanged reauthentication refresh token from Authorization B; revoke both logical credentials. If Apple returns the same refresh-token string for both grants, one successful provider revocation covers both, and that equality must be recorded only as a boolean.
+
+Require client cookies/local observer state to clear, subsequent `/auth/me` to return `401`, and pending/rejected data plus media to be deleted. If testing an approved fixture, require the scientific record to remain only with observer identity irreversibly cleared.
 
 Any failed deletion, failed Apple revocation, surviving pending media, restored session, or identity remaining on an approved row stops certification.
 

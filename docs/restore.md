@@ -36,7 +36,15 @@ Record counts and discrepancies. A mismatch stops reopening. Repair only from a 
 
 ## Reconcile observer sessions and keys
 
-A restore can lower a user's `sessionVersion` and accidentally match an old signed cookie. Keep the production service all-off. From incident evidence, calculate `:incidentMaxSessionVersion` as the maximum observer session version that could have signed a cookie before containment. Independently verify `:incidentMaxSessionVersion BETWEEN 1 AND 2147483646`; the upper bound leaves room for one invalidating increment.
+A restore can lower a user's `sessionVersion` and accidentally match an old signed cookie. Keep the production service all-off. From incident evidence, calculate `:incidentMaxSessionVersion` as the maximum observer session version that could have signed a cookie before containment. Query the restored database before mutation:
+
+```sql
+SELECT MAX("session_version") AS "restoredMaxSessionVersion"
+FROM "users"
+WHERE "role" = 'OBSERVER';
+```
+
+Treat a null result (no restored observers) as `1`. Independently verify both `:incidentMaxSessionVersion BETWEEN 1 AND 2147483646` and `:restoredMaxSessionVersion BETWEEN 1 AND 2147483646`; the upper bound leaves room for one invalidating increment. If the current restored maximum is `2147483647`, or either value is outside its bound, stop and escalate to a separately reviewed schema/session-revocation procedure. Do not run the increment.
 
 Run this bounded transactional update through a reviewed database client with bind-variable support. `ON_ERROR_STOP` (or the client's equivalent) is mandatory so a check, lock, overflow, or update failure rolls back the transaction:
 
@@ -44,10 +52,19 @@ Run this bounded transactional update through a reviewed database client with bi
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 CREATE TEMP TABLE "session_restore_bound" (
-  "incident_max" integer NOT NULL CHECK ("incident_max" BETWEEN 1 AND 2147483646)
+  "incident_max" integer NOT NULL CHECK ("incident_max" BETWEEN 1 AND 2147483646),
+  "restored_max" integer NOT NULL CHECK ("restored_max" BETWEEN 1 AND 2147483646),
+  "actual_restored_max" integer NOT NULL CHECK ("actual_restored_max" BETWEEN 1 AND 2147483646),
+  CHECK ("actual_restored_max" = "restored_max")
 ) ON COMMIT DROP;
-INSERT INTO "session_restore_bound" ("incident_max") VALUES (:incidentMaxSessionVersion);
 LOCK TABLE "users" IN SHARE ROW EXCLUSIVE MODE;
+INSERT INTO "session_restore_bound" ("incident_max", "restored_max", "actual_restored_max")
+SELECT
+  :incidentMaxSessionVersion,
+  :restoredMaxSessionVersion,
+  COALESCE(MAX("session_version"), 1)
+FROM "users"
+WHERE "role" = 'OBSERVER';
 UPDATE "users"
 SET "session_version" = GREATEST("session_version", :incidentMaxSessionVersion) + 1
 WHERE "role" = 'OBSERVER';

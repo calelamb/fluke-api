@@ -404,4 +404,35 @@ describe('release configuration', () => {
       '`{"code":"NOT_FOUND","message":"The requested resource was not found.","requestId":"<non-empty>","retryable":false}`',
     );
   });
+
+  it('uses two distinct single-use Apple authorizations for account deletion', () => {
+    const operations = readRepositoryFile('docs/observer-operations.md');
+
+    expectInOrder(operations, [
+      'Authorization A',
+      'POST `/api/v1/auth/apple`',
+      'exchanged exactly once',
+      'Authorization B',
+      'immediately before `DELETE /api/v1/auth/account`',
+      'DELETE request body',
+      'stored refresh token',
+      'reauthentication refresh token',
+      'revoke both',
+    ]);
+    expect(operations).toContain('authorizationCode`, `identityToken`, and `nonce`');
+    expect(operations).toContain('must be distinct');
+  });
+
+  it('bounds restored and incident session maxima before the invalidating increment', () => {
+    const restore = readRepositoryFile('docs/restore.md');
+
+    expect(restore).toContain('MAX("session_version") AS "restoredMaxSessionVersion"');
+    expect(restore).toContain(':restoredMaxSessionVersion BETWEEN 1 AND 2147483646');
+    expect(restore).toContain(':incidentMaxSessionVersion BETWEEN 1 AND 2147483646');
+    expect(restore).toContain('current restored maximum is `2147483647`');
+    expect(restore).toContain('stop and escalate');
+    expect(restore).toContain(
+      'GREATEST("session_version", :incidentMaxSessionVersion) + 1',
+    );
+  });
 });

@@ -81,3 +81,14 @@ Fresh post-remediation verification used Node v22.17.0, pnpm 10.33.0, and a clea
 - All 10 migrations applied and status was current.
 - Layout, contracts, typecheck, lint, build, production audit, actionlint, Gitleaks, and diff checks passed.
 - Real PostgreSQL coverage passed: 54 files; 511 passed, 1 Docker-only MinIO test skipped; 91.74% statements/lines, 86.67% branches, 95.11% functions.
+
+## Second review remediation
+
+The second review identified one remaining Important deletion-proof ambiguity and one Minor restore overflow gap. Both were reproduced first as exactly two failing release-config tests, then remediated:
+
+- Deletion certification now requires two distinct physical Apple authorizations. Authorization A is sent once to `POST /api/v1/auth/apple` to establish the session and stored refresh token. Authorization B is unused until its code/token/nonce are sent in the DELETE body, where its code is exchanged exactly once. The runbook requires revocation of both the stored and newly exchanged reauthentication refresh credentials before database deletion, matching `account-deletion.ts`.
+- Restore now queries and records the current restored observer maximum, bounds both restored and incident maxima to `1...2147483646`, rechecks the actual maximum under the table lock inside the transaction, and stops/escalates instead of incrementing when the restored maximum is `2147483647`.
+
+Fresh focused verification passed 31/31. The proportionate non-PostgreSQL full gate passed 495 tests with 19 opt-in integration skips and retained 91.18% statements/lines, 85.54% branches, and 94.78% functions; layout, contracts, typecheck, lint, build, audit, and diff checks passed.
+
+The attempted all-PostgreSQL gate passed the Task 10 contract and observer submission tests but exposed an unrelated, reproducible scheduled-job test failure: an immediate lease reacquire can return null after release because `job_leases.lease_expires_at` is `TIMESTAMP(3)` while `CURRENT_TIMESTAMP` has finer precision and can round the stored release time forward. This docs-only remediation did not alter that out-of-scope job-lease implementation; it should be handled as a separate product fix.
