@@ -1,10 +1,13 @@
-import type {
-  LabelablePhotoDTO,
-  PendingSightingDTO,
-  PhotoAnnotationDTO,
-  PhotoAnnotationPayload,
-  WhaleReferencePhotoDTO,
-} from '@fluke/shared';
+import {
+  AnnotatePhotoBodySchema,
+  PhotoQualitySchema,
+  ReferencePhotoSideSchema,
+  type LabelablePhotoDTO,
+  type PendingSightingDTO,
+  type PhotoAnnotationDTO,
+  type PhotoAnnotationPayload,
+  type WhaleReferencePhotoDTO,
+} from '../contracts/index.js';
 import type { FastifyInstance } from 'fastify';
 import sharp from 'sharp';
 import { z } from 'zod';
@@ -12,40 +15,6 @@ import { prisma } from '../db.js';
 import { env } from '../env.js';
 import { requireAdmin } from '../lib/auth.js';
 import { buildPhotoFilename, getStorageBackend } from '../lib/storage.js';
-
-const PhotoQualityEnum = z.enum([
-  'USABLE',
-  'OCCLUDED',
-  'MOTION_BLUR',
-  'WRONG_ANGLE',
-  'TOO_DISTANT',
-  'NOT_ORCA',
-]);
-
-const ConfidenceEnum = z.enum(['CONFIRMED', 'LIKELY', 'ML_SUGGESTED']);
-const ReferencePhotoSideEnum = z.enum(['LEFT', 'RIGHT', 'UNKNOWN']);
-const EmbeddingStatusEnum = z.enum(['PENDING', 'EMBEDDED', 'FAILED']);
-
-const BoxSchema = z.object({
-  x: z.number().finite().nonnegative(),
-  y: z.number().finite().nonnegative(),
-  w: z.number().finite().positive(),
-  h: z.number().finite().positive(),
-});
-
-const AnnotationPayloadSchema = z.object({
-  dorsal_fin: BoxSchema.optional(),
-  saddle_patch: BoxSchema.optional(),
-});
-
-const AnnotateBody = z.object({
-  quality: PhotoQualityEnum,
-  whaleCatalogId: z.string().min(1).optional().nullable(),
-  confidence: ConfidenceEnum.optional().nullable(),
-  payload: AnnotationPayloadSchema.optional(),
-  notes: z.string().max(500).optional().nullable(),
-  done: z.boolean().optional(),
-});
 
 function toAnnotationDTO(annotation: {
   id: string;
@@ -339,7 +308,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     '/photos/:photoId/annotate',
     { preHandler: requireAdmin },
     async (req, reply) => {
-      const parsed = AnnotateBody.safeParse(req.body);
+      const parsed = AnnotatePhotoBodySchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ error: 'invalid body' });
 
       const photo = await prisma.sightingPhoto.findUnique({
@@ -413,8 +382,8 @@ export default async function adminRoutes(app: FastifyInstance) {
   // ---- Identifier reference photos (MiewID V1) ---------------------------
 
   const ReferencePhotoQuery = z.object({
-    side: ReferencePhotoSideEnum.default('UNKNOWN'),
-    quality: PhotoQualityEnum.default('USABLE'),
+    side: ReferencePhotoSideSchema.default('UNKNOWN'),
+    quality: PhotoQualitySchema.default('USABLE'),
     notes: z.string().max(500).optional(),
     cropX: z.coerce.number().finite().nonnegative().optional(),
     cropY: z.coerce.number().finite().nonnegative().optional(),

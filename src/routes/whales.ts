@@ -1,5 +1,10 @@
-import type { NotableEvent, SourceCitation, WhaleDTO, WhaleProfileDTO } from '@fluke/shared';
 import type { FastifyPluginAsync } from 'fastify';
+import type {
+  NotableEvent,
+  SourceCitation,
+  WhaleDTO,
+  WhaleProfileDTO,
+} from '../contracts/index.js';
 import { prisma } from '../db.js';
 
 function asNotableEvents(value: unknown): NotableEvent[] {

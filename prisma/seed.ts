@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import type { NotableEvent, SourceCitation } from '@fluke/shared';
+import type { NotableEvent, SourceCitation } from '../src/contracts/index.js';
 
 // Whale bios are written from public sources and represent the project author's
 // understanding as of seed time. Authoritative catalogs are maintained by:

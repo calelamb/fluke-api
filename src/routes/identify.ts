@@ -1,6 +1,6 @@
-import type { IdentifyResponseDTO } from '@fluke/shared';
 import type { Prisma } from '@prisma/client';
 import type { FastifyPluginAsync } from 'fastify';
+import type { IdentifyResponseDTO } from '../contracts/index.js';
 import { prisma } from '../db.js';
 import { env } from '../env.js';
 import { buildPhotoFilename, getStorageBackend } from '../lib/storage.js';

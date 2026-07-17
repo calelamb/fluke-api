@@ -1,6 +1,6 @@
-import type { Ecotype, ExternalSightingDTO } from '@fluke/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import type { Ecotype, ExternalSightingDTO } from '../contracts/index.js';
 import { prisma } from '../db.js';
 
 const ListQuery = z.object({

@@ -1,6 +1,10 @@
-import type { IdConfidence, SightingDTO, SubmitSightingResponse } from '@fluke/shared';
 import type { FastifyPluginAsync } from 'fastify';
-import { z } from 'zod';
+import {
+  SubmitSightingPayloadSchema,
+  type IdConfidence,
+  type SightingDTO,
+  type SubmitSightingResponse,
+} from '../contracts/index.js';
 import { prisma } from '../db.js';
 
 /**
@@ -21,18 +25,6 @@ export interface PhotoUploadTokenPayload {
 const notImplemented = {
   error: 'Not implemented; reserved for future user-account work',
 };
-
-const SubmitSightingBody = z.object({
-  observedAt: z.string().datetime(),
-  latitude: z.number().min(-90).max(90),
-  longitude: z.number().min(-180).max(180),
-  locationName: z.string().max(200).optional().nullable(),
-  ecotypeGuess: z.enum(['RESIDENT', 'BIGGS', 'OFFSHORE', 'UNKNOWN']).optional().nullable(),
-  groupSize: z.number().int().min(1).max(100).optional().nullable(),
-  behaviorNotes: z.string().max(2000).optional().nullable(),
-  observerName: z.string().max(120).optional().nullable(),
-  observerEmail: z.string().email().max(200),
-});
 
 const sightingsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get('/sightings', async (): Promise<SightingDTO[]> => {
@@ -84,7 +76,7 @@ const sightingsRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request, reply) => {
-      const parsed = SubmitSightingBody.safeParse(request.body);
+      const parsed = SubmitSightingPayloadSchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.code(400).send({ error: 'Invalid sighting submission' });
       }
