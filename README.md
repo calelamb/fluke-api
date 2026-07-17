@@ -119,17 +119,11 @@ Database migrations are intentionally not part of the image startup command. App
 pnpm db:migrate:deploy
 ```
 
-## Railway release
+## Production release
 
-`railway.json` selects the repository Dockerfile and uses `/api/v1/ready` for release health. To release:
+Release A currently runs the repository Docker image on a Render Free web service at `https://fluke-api.onrender.com`, backed by external Neon Postgres. Apply and verify migrations before deploying, then require public `200` responses from `/api/v1/health` and `/api/v1/ready`, validate the catalog and CORS contract, and confirm Release B routes remain fail-closed. The checked-in `railway*.json` files remain an alternative paid topology, not the active host.
 
-1. Create a Railway service from this repository and attach a PostgreSQL service or approved external database.
-2. Configure the validated environment variables in Railway; keep secrets out of build arguments and source control.
-3. Confirm Railway runs `pnpm db:migrate:deploy` from `preDeployCommand` against `DIRECT_URL`.
-4. Deploy the image and require the Railway readiness check to pass before routing traffic.
-5. Probe both `/api/v1/health` and `/api/v1/ready` on the public API origin after release.
-
-A Railway deployment marked successful is not sufficient on its own: the public readiness probe must return the expected `200` response before the release is certified.
+Scheduled ingestion and prediction run through `.github/workflows/scheduled-jobs.yml` using bounded standard GitHub-hosted jobs and repository secrets. See the operational documents below for the exact no-charge topology, probes, timeouts, and retry rules.
 
 Operational procedures:
 

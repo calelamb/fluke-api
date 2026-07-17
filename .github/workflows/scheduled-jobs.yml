@@ -1,0 +1,105 @@
+name: Production scheduled jobs
+
+on:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: Production job to run
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - acartia
+          - gbif
+          - predictions
+  schedule:
+    - cron: '15 */6 * * *'
+    - cron: '15 2 * * 0'
+    - cron: '0 4 * * *'
+
+permissions:
+  contents: read
+
+env:
+  NODE_ENV: production
+  DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+  DIRECT_URL: ${{ secrets.PRODUCTION_DIRECT_URL }}
+  JWT_SECRET: ${{ secrets.SCHEDULED_JOB_JWT_SECRET }}
+  WEB_ORIGIN: https://fluke-pnw.vercel.app
+  API_PUBLIC_ORIGIN: https://fluke-api.onrender.com
+  IDENTIFIER_SERVICE_URL: https://identifier.fluke.invalid
+  ENABLE_ACCOUNTS: "false"
+  ENABLE_IDENTIFY: "false"
+  ENABLE_SUBMISSIONS: "false"
+  STORAGE_BACKEND: local
+
+jobs:
+  acartia:
+    if: >-
+      ${{ github.event.schedule == '15 */6 * * *' ||
+          (github.event_name == 'workflow_dispatch' &&
+           (inputs.job == 'all' || inputs.job == 'acartia')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    concurrency:
+      group: fluke-production-acartia
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.17.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - run: pnpm jobs:acartia
+
+  gbif:
+    if: >-
+      ${{ github.event.schedule == '15 2 * * 0' ||
+          (github.event_name == 'workflow_dispatch' &&
+           (inputs.job == 'all' || inputs.job == 'gbif')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    concurrency:
+      group: fluke-production-gbif
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.17.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - run: pnpm jobs:gbif
+
+  predictions:
+    if: >-
+      ${{ github.event.schedule == '0 4 * * *' ||
+          (github.event_name == 'workflow_dispatch' &&
+           (inputs.job == 'all' || inputs.job == 'predictions')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    concurrency:
+      group: fluke-production-predictions
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.17.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - run: pnpm jobs:predictions
