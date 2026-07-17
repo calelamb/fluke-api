@@ -50,6 +50,30 @@ describe('API environment', () => {
   it('rejects a short JWT secret', () => {
     expect(() => parseEnv({ ...VALID_ENV, JWT_SECRET: 'short' })).toThrow(/JWT_SECRET/);
   });
+
+  it.each([
+    'fluke observer',
+    'fluke_observer',
+    'fluke_csrf',
+    '__Host-fluke_admin',
+    '__Secure-fluke_admin',
+    'a'.repeat(129),
+  ])('rejects an unsafe or colliding admin cookie name: %s', (cookieName) => {
+    expect(() => parseEnv({ ...VALID_ENV, ADMIN_COOKIE_NAME: cookieName })).toThrow(
+      /ADMIN_COOKIE_NAME/,
+    );
+  });
+
+  it('accepts an RFC cookie-token-safe non-colliding admin cookie name', () => {
+    expect(parseEnv({ ...VALID_ENV, ADMIN_COOKIE_NAME: 'fluke-admin.v2' }).ADMIN_COOKIE_NAME)
+      .toBe('fluke-admin.v2');
+  });
+
+  it('rejects an unsupported trust-proxy topology at runtime', async () => {
+    await expect(buildApp({ silent: true, trustProxy: 2 as never })).rejects.toThrow(
+      /trustProxy/,
+    );
+  });
 });
 
 describe('auth routes', () => {
@@ -184,6 +208,33 @@ describe('auth routes', () => {
       })));
 
       expect(responses.map((response) => response.statusCode)).toContain(429);
+    });
+
+    it('rate limits a normalized account key when source IPs rotate and resets the window', async () => {
+      const now = Date.now();
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+      vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
+
+      const attempt = (index: number) => app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        headers: { 'x-forwarded-for': `198.51.100.${100 + index}` },
+        payload: {
+          email: index % 2 === 0 ? ' TARGET@EXAMPLE.COM ' : 'target@example.com',
+          password: 'whatever',
+        },
+      });
+      const responses = [];
+      for (let index = 0; index < 6; index += 1) {
+        responses.push(await attempt(index));
+      }
+
+      expect(responses.slice(0, 5).every((response) => response.statusCode === 401)).toBe(true);
+      expect(responses[5].statusCode).toBe(429);
+
+      clock.mockReturnValue(now + (15 * 60 * 1_000) + 1);
+      const resetResponse = await attempt(6);
+      expect(resetResponse.statusCode).toBe(401);
     });
   });
 

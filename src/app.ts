@@ -41,7 +41,7 @@ export interface BuildAppOptions {
   readonly publicReadTimeoutMs?: number;
   readonly readinessProbe?: ReadinessProbe;
   readonly silent?: boolean;
-  readonly trustProxy?: false | number;
+  readonly trustProxy?: false | 1;
 }
 
 const READINESS_TIMEOUT_MS = 5_000;
@@ -53,6 +53,14 @@ function positiveInteger(value: number, name: string): number {
     throw new Error(`${name} must be a positive integer`);
   }
   return value;
+}
+
+function resolveTrustProxy(value: unknown): false | 1 {
+  const resolved = value ?? (isProduction ? 1 : false);
+  if (resolved !== false && resolved !== 1) {
+    throw new Error('trustProxy must be false or exactly one trusted proxy hop');
+  }
+  return resolved;
 }
 
 function isCanonicalSerializedError(payload: unknown, requestId: string): boolean {
@@ -98,7 +106,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     ),
     readinessProbe: options.readinessProbe ?? defaultReadinessProbe,
     silent: options.silent ?? false,
-    trustProxy: options.trustProxy ?? (isProduction ? 1 : false),
+    // Production is bound to exactly one trusted reverse-proxy hop. Never
+    // trust an arbitrary X-Forwarded-For chain.
+    trustProxy: resolveTrustProxy(options.trustProxy),
   });
   const app = Fastify({
     forceCloseConnections: 'idle',

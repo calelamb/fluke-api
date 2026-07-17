@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import type { FastifyInstance } from 'fastify';
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import { env } from '../env.js';
@@ -11,15 +12,43 @@ import {
 } from '../lib/auth.js';
 
 const LoginBody = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
+  email: z.string().trim().toLowerCase().email().max(320),
+  password: z.string().min(1).max(1_024),
 });
 
+const ADMIN_LOGIN_LIMIT_MAX = 5;
+const ADMIN_LOGIN_WINDOW = '15 minutes';
+
+function accountRateLimitKey(email: string): string {
+  const digest = createHash('sha256').update(email, 'utf8').digest('base64url');
+  return `admin-account:${digest}`;
+}
+
 export default async function authRoutes(app: FastifyInstance) {
+  const checkAccountRateLimit = app.createRateLimit({
+    keyGenerator: (request) => {
+      const parsed = LoginBody.safeParse(request.body);
+      return parsed.success
+        ? accountRateLimitKey(parsed.data.email)
+        : `admin-invalid:${request.ip}`;
+    },
+    max: ADMIN_LOGIN_LIMIT_MAX,
+    timeWindow: ADMIN_LOGIN_WINDOW,
+  });
+  const requireAccountRateLimit = async (request: Parameters<typeof checkAccountRateLimit>[0]) => {
+    const result = await checkAccountRateLimit(request);
+    if (!result.isAllowed && result.isExceeded) {
+      const error = new Error('Rate limit exceeded');
+      Object.assign(error, { statusCode: 429 });
+      throw error;
+    }
+  };
+
   app.post('/login', {
     config: {
-      rateLimit: { max: 5, timeWindow: '15 minutes' },
+      rateLimit: { max: ADMIN_LOGIN_LIMIT_MAX, timeWindow: ADMIN_LOGIN_WINDOW },
     },
+    preHandler: requireAccountRateLimit,
   }, async (req, reply) => {
     const parsed = LoginBody.safeParse(req.body);
     if (!parsed.success) {

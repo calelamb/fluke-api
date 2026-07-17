@@ -12,8 +12,10 @@ vi.mock('../db.js', () => ({
 }));
 
 const { prisma } = await import('../db.js');
+const { classifyError } = await import('../lib/safe-errors.js');
 const {
   OBSERVER_COOKIE_NAME,
+  OBSERVER_ISSUER,
   issueObserverSession,
   requireObserver,
   resolveObserverFromToken,
@@ -107,6 +109,7 @@ describe('observer sessions', () => {
     })
       .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
       .setAudience('fluke-ios-observer')
+      .setIssuer(OBSERVER_ISSUER)
       .setSubject('admin-1')
       .setIssuedAt()
       .setExpirationTime('7d')
@@ -125,12 +128,57 @@ describe('observer sessions', () => {
     })
       .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
       .setAudience('fluke-ios-observer')
+      .setIssuer(OBSERVER_ISSUER)
       .setSubject(OBSERVER.id)
       .setIssuedAt()
       .setExpirationTime('7d')
       .sign(new TextEncoder().encode(OBSERVER_SECRET));
 
     await expect(resolveObserverFromToken(token)).rejects.toMatchObject({ statusCode: 401 });
+  });
+
+  it.each([undefined, 'wrong-observer-issuer'])(
+    'rejects a token with a missing or wrong issuer: %s',
+    async (issuer) => {
+      let builder = new SignJWT({
+        role: 'OBSERVER',
+        sessionVersion: OBSERVER.sessionVersion,
+        type: 'observer-session',
+      })
+        .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+        .setAudience('fluke-ios-observer')
+        .setSubject(OBSERVER.id)
+        .setIssuedAt()
+        .setExpirationTime('7d');
+      if (issuer !== undefined) {
+        builder = builder.setIssuer(issuer);
+      }
+      const token = await builder.sign(new TextEncoder().encode(OBSERVER_SECRET));
+
+      await expect(resolveObserverFromToken(token)).rejects.toMatchObject({ statusCode: 401 });
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    },
+  );
+
+  it('preserves database failures for the canonical server error boundary', async () => {
+    const issued = await app.inject({ method: 'GET', url: '/issue' });
+    const token = String(issued.headers['set-cookie']).split(';', 1)[0].split('=', 2)[1];
+    const failure = Object.assign(new Error('database unavailable'), {
+      name: 'PrismaClientKnownRequestError',
+    });
+    vi.mocked(prisma.user.findUnique).mockRejectedValue(failure);
+
+    await expect(resolveObserverFromToken(token)).rejects.toBe(failure);
+    expect(classifyError(failure, 'request-1')).toEqual({
+      body: {
+        code: 'UPSTREAM_UNAVAILABLE',
+        message: 'A required service is temporarily unavailable.',
+        requestId: 'request-1',
+        retryable: true,
+      },
+      kind: 'database',
+      statusCode: 503,
+    });
   });
 
   it.each([

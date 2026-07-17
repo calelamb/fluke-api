@@ -68,6 +68,7 @@ describe('observer CSRF', () => {
     { cookieToken: 'a'.repeat(87), headerToken: 'a'.repeat(87) },
     { cookieToken: 'a'.repeat(87), headerToken: 'b'.repeat(87) },
     { cookieToken: 'short', headerToken: 'short' },
+    { cookieToken: `${'a'.repeat(43)}.${'b'.repeat(43)}`, headerToken: `${'a'.repeat(43)}.${'!'.repeat(43)}` },
     { cookieToken: 'a'.repeat(513), headerToken: 'a'.repeat(513) },
   ])('rejects missing, forged, mismatched, and unbounded tokens', async ({ cookieToken, headerToken }) => {
     const response = await app.inject({

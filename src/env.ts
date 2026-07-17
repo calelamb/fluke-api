@@ -3,6 +3,22 @@ import { z } from 'zod';
 
 const DEVELOPMENT_WEB_ORIGINS = 'http://localhost:5174,http://localhost:5173';
 const DEVELOPMENT_API_ORIGIN = 'http://localhost:4000';
+const FIXED_OBSERVER_COOKIE_NAMES = new Set(['fluke_observer', 'fluke_csrf']);
+const RFC_COOKIE_TOKEN_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u;
+
+const adminCookieName = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(RFC_COOKIE_TOKEN_PATTERN, 'must be an RFC cookie-token-safe name')
+  .refine(
+    (value) => !FIXED_OBSERVER_COOKIE_NAMES.has(value),
+    'must not collide with a fixed observer cookie name',
+  )
+  .refine(
+    (value) => !value.startsWith('__Host-') && !value.startsWith('__Secure-'),
+    'must not use a security prefix because local non-TLS development cannot honor it',
+  );
 
 const featureFlag = z
   .enum(['true', 'false'])
@@ -27,7 +43,7 @@ const envSchema = z
     DIRECT_URL: z.string().startsWith('postgresql://'),
     PORT: z.coerce.number().int().positive().default(4000),
     JWT_SECRET: z.string().min(32),
-    ADMIN_COOKIE_NAME: z.string().min(1).default('fluke_admin'),
+    ADMIN_COOKIE_NAME: adminCookieName.default('fluke_admin'),
     WEB_ORIGIN: originList.default(DEVELOPMENT_WEB_ORIGINS),
     ENABLE_SUBMISSIONS: featureFlag,
     ENABLE_ACCOUNTS: featureFlag,

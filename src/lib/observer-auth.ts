@@ -5,6 +5,7 @@ import { isProduction } from '../env.js';
 
 export const OBSERVER_COOKIE_NAME = 'fluke_observer';
 export const OBSERVER_AUDIENCE = 'fluke-ios-observer';
+export const OBSERVER_ISSUER = 'fluke-api';
 
 const OBSERVER_SESSION_TYPE = 'observer-session';
 const OBSERVER_SESSION_SECONDS = 60 * 60 * 24 * 7;
@@ -13,6 +14,7 @@ const ALLOWED_CLAIM_NAMES = new Set([
   'aud',
   'exp',
   'iat',
+  'iss',
   'role',
   'sessionVersion',
   'sub',
@@ -21,6 +23,7 @@ const ALLOWED_CLAIM_NAMES = new Set([
 
 export interface ObserverClaims extends JWTPayload {
   readonly aud: typeof OBSERVER_AUDIENCE;
+  readonly iss: typeof OBSERVER_ISSUER;
   readonly role: 'OBSERVER';
   readonly sessionVersion: number;
   readonly sub: string;
@@ -50,6 +53,13 @@ export class ObserverAuthError extends Error {
   }
 }
 
+class ObserverConfigurationError extends Error {
+  constructor() {
+    super('Observer session configuration is invalid');
+    this.name = 'ObserverConfigurationError';
+  }
+}
+
 declare module 'fastify' {
   interface FastifyRequest {
     observer?: ObserverPrincipal;
@@ -59,7 +69,7 @@ declare module 'fastify' {
 function observerSecret(): Uint8Array {
   const secret = process.env.OBSERVER_JWT_SECRET;
   if (!secret || secret.length < MINIMUM_SECRET_LENGTH) {
-    throw new Error('Observer session configuration is invalid');
+    throw new ObserverConfigurationError();
   }
   return new TextEncoder().encode(secret);
 }
@@ -70,6 +80,7 @@ function hasExactObserverClaims(payload: JWTPayload): payload is ObserverClaims 
     claimNames.every((name) => ALLOWED_CLAIM_NAMES.has(name))
     && claimNames.length === ALLOWED_CLAIM_NAMES.size
     && payload.aud === OBSERVER_AUDIENCE
+    && payload.iss === OBSERVER_ISSUER
     && payload.role === 'OBSERVER'
     && Number.isInteger(payload.sessionVersion)
     && typeof payload.sessionVersion === 'number'
@@ -97,6 +108,7 @@ export async function issueObserverSession(
   })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setAudience(OBSERVER_AUDIENCE)
+    .setIssuer(OBSERVER_ISSUER)
     .setSubject(user.id)
     .setIssuedAt()
     .setExpirationTime(`${OBSERVER_SESSION_SECONDS}s`)
@@ -113,46 +125,48 @@ export async function issueObserverSession(
 }
 
 export async function resolveObserverFromToken(token: string): Promise<ObserverPrincipal> {
+  let claims: ObserverClaims;
   try {
     const verified = await jwtVerify(token, observerSecret(), {
       algorithms: ['HS256'],
       audience: OBSERVER_AUDIENCE,
+      issuer: OBSERVER_ISSUER,
       typ: 'JWT',
     });
     if (!hasExactObserverClaims(verified.payload)) {
       throw new ObserverAuthError();
     }
-
-    const observer = await prisma.user.findUnique({
-      where: { id: verified.payload.sub },
-      select: {
-        displayName: true,
-        email: true,
-        id: true,
-        role: true,
-        sessionVersion: true,
-      },
-    });
-    if (
-      observer?.role !== 'OBSERVER'
-      || observer.sessionVersion !== verified.payload.sessionVersion
-    ) {
-      throw new ObserverAuthError();
-    }
-
-    return Object.freeze({
-      displayName: observer.displayName,
-      email: observer.email,
-      id: observer.id,
-      role: observer.role,
-      sessionVersion: observer.sessionVersion,
-    });
+    claims = verified.payload;
   } catch (error: unknown) {
-    if (error instanceof Error && error.message === 'Observer session configuration is invalid') {
+    if (error instanceof ObserverConfigurationError) {
       throw error;
     }
     throw new ObserverAuthError();
   }
+
+  // Deliberately outside the JWT catch: database failures are operational
+  // failures and must reach the app's canonical 5xx boundary and structured log.
+  const observer = await prisma.user.findUnique({
+    where: { id: claims.sub },
+    select: {
+      displayName: true,
+      email: true,
+      id: true,
+      role: true,
+      sessionVersion: true,
+    },
+  });
+  if (observer?.role !== 'OBSERVER' || observer.sessionVersion !== claims.sessionVersion) {
+    throw new ObserverAuthError();
+  }
+
+  return Object.freeze({
+    displayName: observer.displayName,
+    email: observer.email,
+    id: observer.id,
+    role: observer.role,
+    sessionVersion: observer.sessionVersion,
+  });
 }
 
 export async function resolveOptionalObserver(

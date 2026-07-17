@@ -59,11 +59,15 @@ function hasAllowedOrigin(request: FastifyRequest): boolean {
 }
 
 function isValidSignedToken(token: string): boolean {
-  if (token.length > MAX_CSRF_TOKEN_LENGTH || !CSRF_TOKEN_PATTERN.test(token)) {
+  if (!isBoundedCsrfToken(token)) {
     return false;
   }
   const [rawToken, suppliedSignature] = token.split('.');
   return safeEqual(suppliedSignature, signature(rawToken));
+}
+
+function isBoundedCsrfToken(token: string): boolean {
+  return token.length <= MAX_CSRF_TOKEN_LENGTH && CSRF_TOKEN_PATTERN.test(token);
 }
 
 export function issueCsrfToken(reply: FastifyReply): string {
@@ -88,6 +92,8 @@ export async function requireCsrf(
     typeof cookieToken !== 'string'
     || typeof headerToken !== 'string'
     || !hasAllowedOrigin(request)
+    || !isBoundedCsrfToken(cookieToken)
+    || !isBoundedCsrfToken(headerToken)
     || !safeEqual(cookieToken, headerToken)
     || !isValidSignedToken(cookieToken)
   ) {
