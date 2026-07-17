@@ -1,12 +1,16 @@
 import type { FastifyPluginAsync } from 'fastify';
 import {
-  RELEASE_A_CAPABILITIES,
   type Capabilities,
 } from '../contracts/index.js';
+import type { FeatureConfig } from '../features.js';
 
-const capabilitiesRoutes: FastifyPluginAsync = async (fastify) => {
+interface CapabilitiesRouteOptions {
+  readonly features: FeatureConfig;
+}
+
+const capabilitiesRoutes: FastifyPluginAsync<CapabilitiesRouteOptions> = async (fastify, options) => {
   fastify.get('/capabilities', async (): Promise<Capabilities> => ({
-    ...RELEASE_A_CAPABILITIES,
+    ...options.features,
   }));
 };
 

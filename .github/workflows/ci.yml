@@ -82,8 +82,8 @@ jobs:
             -e DIRECT_URL \
             -e JWT_SECRET \
             -e NODE_ENV=production \
-            -e WEB_ORIGIN \
-            -e API_PUBLIC_ORIGIN \
+            -e WEB_ORIGIN=https://web.ci.invalid \
+            -e API_PUBLIC_ORIGIN=https://api.ci.invalid \
             -e IDENTIFIER_SERVICE_URL \
             fluke-api:ci
           cleanup() {

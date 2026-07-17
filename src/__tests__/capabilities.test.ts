@@ -7,7 +7,14 @@ describe('GET /api/v1/capabilities', () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    app = await buildApp({ silent: true });
+    app = await buildApp({
+      features: {
+        accounts: false,
+        identification: false,
+        submissions: false,
+      },
+      silent: true,
+    });
     await app.ready();
   });
 

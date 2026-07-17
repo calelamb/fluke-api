@@ -9,6 +9,11 @@ import { mkdir } from 'node:fs/promises';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { prisma } from './db.js';
 import { env, isProduction } from './env.js';
+import {
+  features as environmentFeatures,
+  validateFeatureConfig,
+  type FeatureConfig,
+} from './features.js';
 import { resolveUploadsDir } from './lib/storage.js';
 import adminRoutes from './routes/admin.js';
 import authRoutes from './routes/auth.js';
@@ -18,10 +23,12 @@ import healthRoutes, { type ReadinessProbe } from './routes/health.js';
 import identifyRoutes from './routes/identify.js';
 import predictRoutes from './routes/predict.js';
 import sightingPhotosRoutes from './routes/sighting-photos.js';
+import sightingSubmissionRoutes from './routes/sighting-submissions.js';
 import sightingsRoutes from './routes/sightings.js';
 import whalesRoutes from './routes/whales.js';
 
 export interface BuildAppOptions {
+  readonly features?: FeatureConfig;
   readonly readinessProbe?: ReadinessProbe;
   readonly silent?: boolean;
 }
@@ -46,6 +53,7 @@ async function defaultReadinessProbe(): Promise<void> {
 
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
   const resolvedOptions = Object.freeze({
+    features: validateFeatureConfig(options.features ?? environmentFeatures),
     readinessProbe: options.readinessProbe ?? defaultReadinessProbe,
     silent: options.silent ?? false,
   });
@@ -79,14 +87,19 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   });
   await app.register(rateLimit, { global: false });
   await app.register(sensible);
-  await app.register(multipart, {
-    limits: {
-      fileSize: 10 * 1024 * 1024, // 10 MB per file
-      files: 1,
-    },
-  });
+  const hasUploadSurface = resolvedOptions.features.accounts
+    || resolvedOptions.features.identification
+    || resolvedOptions.features.submissions;
+  if (hasUploadSurface) {
+    await app.register(multipart, {
+      limits: {
+        fileSize: 10 * 1024 * 1024, // 10 MB per file
+        files: 1,
+      },
+    });
+  }
 
-  if (env.STORAGE_BACKEND === 'local') {
+  if (hasUploadSurface && env.STORAGE_BACKEND === 'local') {
     const uploadsRoot = resolveUploadsDir();
     await mkdir(uploadsRoot, { recursive: true });
     await app.register(staticPlugin, {
@@ -104,15 +117,31 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     prefix: '/api/v1',
     readinessProbe: resolvedOptions.readinessProbe,
   });
-  await app.register(capabilitiesRoutes, { prefix: '/api/v1' });
+  await app.register(capabilitiesRoutes, {
+    prefix: '/api/v1',
+    features: resolvedOptions.features,
+  });
   await app.register(whalesRoutes, { prefix: '/api/v1' });
   await app.register(sightingsRoutes, { prefix: '/api/v1' });
-  await app.register(sightingPhotosRoutes, { prefix: '/api/v1' });
   await app.register(externalSightingsRoutes, { prefix: '/api/v1' });
-  await app.register(identifyRoutes, { prefix: '/api/v1' });
   await app.register(predictRoutes, { prefix: '/api/v1' });
-  await app.register(authRoutes, { prefix: '/api/v1/auth' });
-  await app.register(adminRoutes, { prefix: '/api/v1/admin' });
+  if (resolvedOptions.features.submissions) {
+    await app.register(sightingSubmissionRoutes, { prefix: '/api/v1' });
+  }
+  if (resolvedOptions.features.submissions || resolvedOptions.features.accounts) {
+    await app.register(sightingPhotosRoutes, {
+      prefix: '/api/v1',
+      accounts: resolvedOptions.features.accounts,
+      submissions: resolvedOptions.features.submissions,
+    });
+  }
+  if (resolvedOptions.features.identification) {
+    await app.register(identifyRoutes, { prefix: '/api/v1' });
+  }
+  if (resolvedOptions.features.accounts) {
+    await app.register(authRoutes, { prefix: '/api/v1/auth' });
+    await app.register(adminRoutes, { prefix: '/api/v1/admin' });
+  }
 
   return app;
 }

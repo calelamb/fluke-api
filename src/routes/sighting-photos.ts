@@ -7,7 +7,7 @@ import { buildPhotoFilename, getStorageBackend } from '../lib/storage.js';
 import {
   PHOTO_UPLOAD_TOKEN_TYPE,
   type PhotoUploadTokenPayload,
-} from './sightings.js';
+} from './sighting-submissions.js';
 
 const MAX_PHOTOS_PER_SIGHTING = 5;
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
@@ -52,7 +52,12 @@ function verifyPhotoUploadToken(
   }
 }
 
-const sightingPhotosRoutes: FastifyPluginAsync = async (fastify) => {
+interface SightingPhotosRouteOptions {
+  readonly accounts: boolean;
+  readonly submissions: boolean;
+}
+
+const sightingPhotosRoutes: FastifyPluginAsync<SightingPhotosRouteOptions> = async (fastify, options) => {
   /**
    * Photo upload route. Same path used for both public submitters and
    * admins; the auth check is opportunistic:
@@ -62,7 +67,7 @@ const sightingPhotosRoutes: FastifyPluginAsync = async (fastify) => {
    *     30 minutes; per-IP rate limit applies.
    * Both paths share the same multipart parsing and sharp pipeline.
    */
-  fastify.post<{ Params: { id: string } }>(
+  if (options.submissions) fastify.post<{ Params: { id: string } }>(
     '/sightings/:id/photos',
     {
       config: {
@@ -202,7 +207,7 @@ const sightingPhotosRoutes: FastifyPluginAsync = async (fastify) => {
     },
   );
 
-  fastify.get<{ Params: { id: string } }>(
+  if (options.accounts) fastify.get<{ Params: { id: string } }>(
     '/sightings/:id/photos',
     { preHandler: requireAdmin },
     async (request) => {

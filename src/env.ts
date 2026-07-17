@@ -1,5 +1,13 @@
 import { z } from 'zod';
 
+const DEVELOPMENT_WEB_ORIGINS = 'http://localhost:5174,http://localhost:5173';
+const DEVELOPMENT_API_ORIGIN = 'http://localhost:4000';
+
+const featureFlag = z
+  .enum(['true', 'false'])
+  .default('false')
+  .transform((value) => value === 'true');
+
 const originList = z
   .string()
   .min(1)
@@ -19,7 +27,10 @@ const envSchema = z
     PORT: z.coerce.number().int().positive().default(4000),
     JWT_SECRET: z.string().min(32),
     ADMIN_COOKIE_NAME: z.string().min(1).default('fluke_admin'),
-    WEB_ORIGIN: originList.default('http://localhost:5174,http://localhost:5173'),
+    WEB_ORIGIN: originList.default(DEVELOPMENT_WEB_ORIGINS),
+    ENABLE_SUBMISSIONS: featureFlag,
+    ENABLE_ACCOUNTS: featureFlag,
+    ENABLE_IDENTIFY: featureFlag,
 
     // Photo storage backend. 'local' writes to apps/api/uploads/ and the API
     // serves them statically; 'r2' is reserved for the R2 adapter (stubbed
@@ -31,7 +42,7 @@ const envSchema = z
      * URLs returned to the frontend. Defaults to localhost in dev; set to
      * the production API host (e.g. https://api.fluke.example) in prod.
      */
-    API_PUBLIC_ORIGIN: z.string().url().default('http://localhost:4000'),
+    API_PUBLIC_ORIGIN: z.string().url().default(DEVELOPMENT_API_ORIGIN),
     IDENTIFIER_SERVICE_URL: z.string().url().default('http://localhost:4100'),
 
     R2_BUCKET: z.string().optional(),
@@ -57,17 +68,108 @@ const envSchema = z
 
 export type Env = z.infer<typeof envSchema>;
 
+function isPrivateIpv4(hostname: string): boolean {
+  const octets = hostname.split('.').map(Number);
+  if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet))) {
+    return false;
+  }
+
+  const [first, second] = octets;
+  return first === 0
+    || first === 10
+    || first === 127
+    || (first === 169 && second === 254)
+    || (first === 172 && second >= 16 && second <= 31)
+    || (first === 192 && second === 168);
+}
+
+function productionOriginIssue(origin: string): string | null {
+  const parsed = new URL(origin);
+  const hostname = parsed.hostname.toLowerCase();
+  const isLocalName = hostname === 'localhost'
+    || hostname.endsWith('.localhost')
+    || hostname.endsWith('.local')
+    || hostname.endsWith('.internal');
+  const isLocalIpv6 = hostname === '[::1]' || hostname === '[::]';
+
+  if (parsed.protocol !== 'https:') {
+    return 'must use HTTPS';
+  }
+  if (hostname.includes('*')) {
+    return 'must not contain a wildcard host';
+  }
+  if (isLocalName || isLocalIpv6 || isPrivateIpv4(hostname)) {
+    return 'must use a non-local public host';
+  }
+  if (parsed.username || parsed.password) {
+    return 'must not include credentials';
+  }
+  if (parsed.pathname !== '/' || parsed.search || parsed.hash) {
+    return 'must be an origin without a path, query, or fragment';
+  }
+
+  return null;
+}
+
+function productionIssues(input: NodeJS.ProcessEnv, parsed: Env): readonly string[] {
+  if (parsed.NODE_ENV !== 'production') {
+    return [];
+  }
+
+  const issues: string[] = [];
+  if (!input.WEB_ORIGIN) {
+    issues.push('WEB_ORIGIN: is required explicitly in production');
+  } else {
+    for (const origin of parsed.WEB_ORIGIN) {
+      const issue = productionOriginIssue(origin);
+      if (issue) {
+        issues.push(`WEB_ORIGIN: origin ${origin} ${issue}`);
+      }
+    }
+  }
+
+  if (!input.API_PUBLIC_ORIGIN) {
+    issues.push('API_PUBLIC_ORIGIN: is required explicitly in production');
+  } else {
+    const issue = productionOriginIssue(parsed.API_PUBLIC_ORIGIN);
+    if (issue) {
+      issues.push(`API_PUBLIC_ORIGIN: origin ${parsed.API_PUBLIC_ORIGIN} ${issue}`);
+    }
+  }
+
+  const releaseBFlags = [
+    ['ENABLE_ACCOUNTS', parsed.ENABLE_ACCOUNTS],
+    ['ENABLE_IDENTIFY', parsed.ENABLE_IDENTIFY],
+    ['ENABLE_SUBMISSIONS', parsed.ENABLE_SUBMISSIONS],
+  ] as const;
+  for (const [name, enabled] of releaseBFlags) {
+    if (enabled) {
+      issues.push(`${name}: must remain false in production Release A`);
+    }
+  }
+
+  return issues;
+}
+
+function formatEnvironmentError(issues: readonly string[]): Error {
+  const details = issues.map((issue) => `- ${issue}`).join('\n');
+  return new Error(
+    `Invalid API environment.\n${details}\n\nCopy .env.example to .env and fill in the database connection strings, JWT_SECRET, and WEB_ORIGIN.`,
+  );
+}
+
 export function parseEnv(input: NodeJS.ProcessEnv): Env {
   const parsedEnv = envSchema.safeParse(input);
 
   if (!parsedEnv.success) {
-    const details = parsedEnv.error.issues
-      .map((issue) => `- ${issue.path.join('.')}: ${issue.message}`)
-      .join('\n');
-
-    throw new Error(
-      `Invalid API environment.\n${details}\n\nCopy .env.example to .env and fill in the database connection strings, JWT_SECRET, and WEB_ORIGIN.`,
+    throw formatEnvironmentError(
+      parsedEnv.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`),
     );
+  }
+
+  const releaseIssues = productionIssues(input, parsedEnv.data);
+  if (releaseIssues.length > 0) {
+    throw formatEnvironmentError(releaseIssues);
   }
 
   return parsedEnv.data;
