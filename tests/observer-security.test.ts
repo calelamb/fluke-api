@@ -36,6 +36,7 @@ describe('observer release security gates', () => {
 
     expect(workflow).toMatch(/minio\/minio@sha256:[a-f0-9]{64}/u);
     expect(workflow).toMatch(/# MinIO RELEASE\.[0-9TZ-]+/u);
+    expect(workflow).toContain('--env MINIO_SITE_REGION="$CI_S3_REGION"');
     expect(workflow).toContain('mc mb --ignore-existing local/fluke-ci-private');
     expect(workflow).toContain('mc anonymous set none local/fluke-ci-private');
   });
@@ -107,7 +108,7 @@ describe.runIf(process.env.RUN_S3_INTEGRATION === 'true')('private S3 integratio
       credentials,
       endpoint,
       forcePathStyle: true,
-      region: 'us-west-2',
+      region: process.env.CI_S3_REGION ?? '',
       requestChecksumCalculation: 'WHEN_REQUIRED',
       responseChecksumValidation: 'WHEN_REQUIRED',
     });
@@ -116,7 +117,7 @@ describe.runIf(process.env.RUN_S3_INTEGRATION === 'true')('private S3 integratio
       bucket: process.env.CI_S3_BUCKET ?? '',
       endpoint: 'https://objects.ci.example.com',
       forcePathStyle: true,
-      region: 'us-west-2',
+      region: process.env.CI_S3_REGION ?? '',
     }, client);
     const body = Buffer.from('private-ci-image');
     try {
