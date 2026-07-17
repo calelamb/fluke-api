@@ -9,6 +9,8 @@ import {
 } from '../lib/csrf.js';
 
 const CSRF_SECRET = 'csrf-test-secret-material-that-is-longer-than-forty-three-characters';
+const CONFIGURED_WEB_ORIGIN = (process.env.WEB_ORIGIN ?? 'http://localhost:5173').split(',')[0]
+  ?? 'http://localhost:5173';
 
 function cookieValue(setCookie: string): string {
   const pair = setCookie.split(';', 1)[0];
@@ -91,7 +93,7 @@ describe('observer CSRF', () => {
     const webResponse = await app.inject({
       method: 'POST',
       url: '/mutate',
-      headers: { ...headers, origin: 'http://localhost:5173' },
+      headers: { ...headers, origin: CONFIGURED_WEB_ORIGIN },
       cookies,
     });
 
