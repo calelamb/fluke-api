@@ -3,149 +3,208 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "Sightings": {
-      "items": {
-        "additionalProperties": false,
-        "properties": {
-          "behaviorNotes": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "ecotypeGuess": {
-            "anyOf": [
-              {
-                "enum": [
-                  "RESIDENT",
-                  "BIGGS",
-                  "OFFSHORE",
-                  "UNKNOWN"
-                ],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "behaviorNotes": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "ecotypeGuess": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "RESIDENT",
+                      "BIGGS",
+                      "OFFSHORE",
+                      "UNKNOWN"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "groupSize": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "id": {
                 "type": "string"
               },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "groupSize": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "id": {
-            "type": "string"
-          },
-          "identifiedWhales": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "catalogId": {
-                  "type": "string"
-                },
-                "confidence": {
-                  "enum": [
-                    "CONFIRMED",
-                    "LIKELY",
-                    "ML_SUGGESTED"
+              "identifiedWhales": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "catalogId": {
+                      "type": "string"
+                    },
+                    "confidence": {
+                      "enum": [
+                        "CONFIRMED",
+                        "LIKELY",
+                        "ML_SUGGESTED"
+                      ],
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "catalogId",
+                    "name",
+                    "confidence"
                   ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "latitude": {
+                "maximum": 90,
+                "minimum": -90,
+                "type": "number"
+              },
+              "locationName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "longitude": {
+                "maximum": 180,
+                "minimum": -180,
+                "type": "number"
+              },
+              "observedAt": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "photoUrls": {
+                "items": {
+                  "format": "uri",
                   "type": "string"
                 },
-                "name": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                }
+                "type": "array"
               },
-              "required": [
-                "catalogId",
-                "name",
-                "confidence"
-              ],
-              "type": "object"
+              "photos": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "orderIndex": {
+                      "type": "integer"
+                    },
+                    "thumbnailUrl": {
+                      "format": "uri",
+                      "type": "string"
+                    },
+                    "url": {
+                      "format": "uri",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "url",
+                    "thumbnailUrl",
+                    "orderIndex"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "status": {
+                "enum": [
+                  "PENDING",
+                  "APPROVED",
+                  "REJECTED"
+                ],
+                "type": "string"
+              }
             },
-            "type": "array"
+            "required": [
+              "id",
+              "observedAt",
+              "latitude",
+              "longitude",
+              "locationName",
+              "ecotypeGuess",
+              "groupSize",
+              "behaviorNotes",
+              "status",
+              "photoUrls",
+              "photos",
+              "identifiedWhales"
+            ],
+            "type": "object"
           },
-          "latitude": {
-            "type": "number"
-          },
-          "locationName": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "longitude": {
-            "type": "number"
-          },
-          "observedAt": {
-            "type": "string"
-          },
-          "photoUrls": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "photos": {
-            "items": {
+          "maxItems": 100,
+          "type": "array"
+        },
+        "page": {
+          "anyOf": [
+            {
               "additionalProperties": false,
               "properties": {
-                "id": {
-                  "type": "string"
+                "hasMore": {
+                  "const": true,
+                  "type": "boolean"
                 },
-                "orderIndex": {
-                  "type": "integer"
-                },
-                "thumbnailUrl": {
-                  "type": "string"
-                },
-                "url": {
+                "nextCursor": {
+                  "maxLength": 512,
+                  "minLength": 1,
                   "type": "string"
                 }
               },
               "required": [
-                "id",
-                "url",
-                "thumbnailUrl",
-                "orderIndex"
+                "hasMore",
+                "nextCursor"
               ],
               "type": "object"
             },
-            "type": "array"
-          },
-          "status": {
-            "enum": [
-              "PENDING",
-              "APPROVED",
-              "REJECTED"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "observedAt",
-          "latitude",
-          "longitude",
-          "locationName",
-          "ecotypeGuess",
-          "groupSize",
-          "behaviorNotes",
-          "status",
-          "photoUrls",
-          "photos",
-          "identifiedWhales"
-        ],
-        "type": "object"
+            {
+              "additionalProperties": false,
+              "properties": {
+                "hasMore": {
+                  "const": false,
+                  "type": "boolean"
+                },
+                "nextCursor": {
+                  "type": "null"
+                }
+              },
+              "required": [
+                "hasMore",
+                "nextCursor"
+              ],
+              "type": "object"
+            }
+          ]
+        }
       },
-      "type": "array"
+      "required": [
+        "items",
+        "page"
+      ],
+      "type": "object"
     }
   }
 }

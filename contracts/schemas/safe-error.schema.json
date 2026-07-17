@@ -5,13 +5,38 @@
     "SafeError": {
       "additionalProperties": false,
       "properties": {
-        "error": {
+        "code": {
+          "enum": [
+            "VALIDATION_ERROR",
+            "NOT_FOUND",
+            "UNAUTHORIZED",
+            "FORBIDDEN",
+            "RATE_LIMITED",
+            "CONFLICT",
+            "UPSTREAM_UNAVAILABLE",
+            "INTERNAL_ERROR"
+          ],
+          "type": "string"
+        },
+        "message": {
+          "maxLength": 500,
           "minLength": 1,
           "type": "string"
+        },
+        "requestId": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
         }
       },
       "required": [
-        "error"
+        "code",
+        "message",
+        "retryable",
+        "requestId"
       ],
       "type": "object"
     }

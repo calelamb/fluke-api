@@ -1,31 +1,37 @@
-[
-  {
-    "biography": "Synthetic biography for contract testing only.",
-    "birthYear": 2000,
-    "catalogId": "FX-001",
-    "deathYear": null,
-    "distinguishingMarks": "Synthetic distinguishing marks.",
-    "ecotype": "UNKNOWN",
-    "heroImageUrl": "https://fixtures.invalid/whales/fixture-alpha.jpg",
-    "id": "fixture-whale-alpha",
-    "name": "Fixture Whale Alpha",
-    "notableEvents": [
-      {
-        "date": "2024-01-15",
-        "source": "Synthetic Fixture Source",
-        "summary": "Synthetic milestone for contract testing.",
-        "type": "milestone",
-        "year": 2024
-      }
-    ],
-    "pod": "FIXTURE_POD",
-    "sex": "FEMALE",
-    "sourceCitations": [
-      {
-        "label": "Synthetic Fixture Citation",
-        "url": "https://fixtures.invalid/sources/synthetic"
-      }
-    ],
-    "status": "ALIVE"
+{
+  "items": [
+    {
+      "biography": "Synthetic biography for contract testing only.",
+      "birthYear": 2000,
+      "catalogId": "FX-001",
+      "deathYear": null,
+      "distinguishingMarks": "Synthetic distinguishing marks.",
+      "ecotype": "UNKNOWN",
+      "heroImageUrl": "https://fixtures.invalid/whales/fixture-alpha.jpg",
+      "id": "fixture-whale-alpha",
+      "name": "Fixture Whale Alpha",
+      "notableEvents": [
+        {
+          "date": "2024-01-15",
+          "source": "Synthetic Fixture Source",
+          "summary": "Synthetic milestone for contract testing.",
+          "type": "milestone",
+          "year": 2024
+        }
+      ],
+      "pod": "FIXTURE_POD",
+      "sex": "FEMALE",
+      "sourceCitations": [
+        {
+          "label": "Synthetic Fixture Citation",
+          "url": "https://fixtures.invalid/sources/synthetic"
+        }
+      ],
+      "status": "ALIVE"
+    }
+  ],
+  "page": {
+    "hasMore": false,
+    "nextCursor": null
   }
-]
+}

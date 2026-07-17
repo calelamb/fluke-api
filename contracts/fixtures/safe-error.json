@@ -1,3 +1,6 @@
 {
-  "error": "Requested fixture resource was not found."
+  "code": "NOT_FOUND",
+  "message": "Requested fixture resource was not found.",
+  "requestId": "fixture-request-1",
+  "retryable": false
 }

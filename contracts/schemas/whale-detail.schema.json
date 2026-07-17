@@ -50,9 +50,14 @@
           "type": "string"
         },
         "heroImageUrl": {
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "format": "uri",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "id": {
@@ -165,6 +170,8 @@
                 "type": "string"
               },
               "latitude": {
+                "maximum": 90,
+                "minimum": -90,
                 "type": "number"
               },
               "locationName": {
@@ -174,9 +181,12 @@
                 ]
               },
               "longitude": {
+                "maximum": 180,
+                "minimum": -180,
                 "type": "number"
               },
               "observedAt": {
+                "format": "date-time",
                 "type": "string"
               }
             },
@@ -207,6 +217,7 @@
                 "type": "string"
               },
               "url": {
+                "format": "uri",
                 "type": "string"
               }
             },

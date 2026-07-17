@@ -1,5 +1,25 @@
 import { z } from 'zod';
 
+export const IsoDateTimeSchema = z.string().datetime({ offset: true });
+export const LatitudeSchema = z.number().finite().min(-90).max(90);
+export const LongitudeSchema = z.number().finite().min(-180).max(180);
+export const ProbabilitySchema = z.number().finite().min(0).max(1);
+export const HttpUrlSchema = z.string().url().refine(
+  (value) => value.startsWith('https://') || value.startsWith('http://'),
+  'URL must use http or https',
+);
+export const CursorSchema = z.string().min(1).max(512);
+export const PageInfoSchema = z.discriminatedUnion('hasMore', [
+  z.object({
+    hasMore: z.literal(true),
+    nextCursor: CursorSchema,
+  }).strict(),
+  z.object({
+    hasMore: z.literal(false),
+    nextCursor: z.null(),
+  }).strict(),
+]);
+
 export const EcotypeSchema = z.enum(['RESIDENT', 'BIGGS', 'OFFSHORE', 'UNKNOWN']);
 export const SexSchema = z.enum(['MALE', 'FEMALE', 'UNKNOWN']);
 export const WhaleStatusSchema = z.enum(['ALIVE', 'DECEASED', 'UNKNOWN']);
@@ -26,3 +46,4 @@ export type PhotoQuality = z.infer<typeof PhotoQualitySchema>;
 export type ReferencePhotoSide = z.infer<typeof ReferencePhotoSideSchema>;
 export type EmbeddingStatus = z.infer<typeof EmbeddingStatusSchema>;
 export type Pod = z.infer<typeof PodSchema>;
+export type PageInfo = z.infer<typeof PageInfoSchema>;

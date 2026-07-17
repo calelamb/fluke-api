@@ -1,0 +1,14 @@
+{
+  "catalogId": "FX-001",
+  "points": [
+    {
+      "behaviorNotes": "Synthetic travel notes for contract testing.",
+      "id": "fixture-sighting-1",
+      "latitude": 12.345,
+      "locationName": "Fixture Strait",
+      "longitude": -45.678,
+      "observedAt": "2026-07-16T18:00:00.000Z"
+    }
+  ],
+  "whaleId": "fixture-whale-alpha"
+}

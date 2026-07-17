@@ -10,12 +10,18 @@
             "additionalProperties": false,
             "properties": {
               "lat": {
+                "maximum": 90,
+                "minimum": -90,
                 "type": "number"
               },
               "lng": {
+                "maximum": 180,
+                "minimum": -180,
                 "type": "number"
               },
               "probability": {
+                "maximum": 1,
+                "minimum": 0,
                 "type": "number"
               }
             },
@@ -29,9 +35,12 @@
           "type": "array"
         },
         "computedAt": {
+          "format": "date-time",
           "type": "string"
         },
         "confidence": {
+          "maximum": 1,
+          "minimum": 0,
           "type": "number"
         },
         "modelVersion": {

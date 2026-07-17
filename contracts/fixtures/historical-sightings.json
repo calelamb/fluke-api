@@ -1,13 +1,19 @@
-[
-  {
-    "ecotypeGuess": "UNKNOWN",
-    "id": "historical-sighting-1",
-    "latitude": 12.345,
-    "locationName": "Fixture Strait",
-    "longitude": -45.678,
-    "observedAt": "2025-07-16T18:00:00.000Z",
-    "whaleIds": [
-      "fixture-whale-alpha"
-    ]
+{
+  "items": [
+    {
+      "ecotypeGuess": "UNKNOWN",
+      "id": "historical-sighting-1",
+      "latitude": 12.345,
+      "locationName": "Fixture Strait",
+      "longitude": -45.678,
+      "observedAt": "2025-07-16T18:00:00.000Z",
+      "whaleIds": [
+        "fixture-whale-alpha"
+      ]
+    }
+  ],
+  "page": {
+    "hasMore": false,
+    "nextCursor": null
   }
-]
+}

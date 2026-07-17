@@ -1,15 +1,16 @@
 import { z, type ZodType } from 'zod';
 import {
   CapabilitiesSchema,
-  ExternalSightingSchema,
-  HistoricalSightingSchema,
+  ExternalSightingPageSchema,
+  HistoricalSightingPageSchema,
   IdentifyResponseSchema,
   PredictionSchema,
   RELEASE_A_CAPABILITIES,
   SafeErrorSchema,
-  SightingSchema,
+  SightingPageSchema,
   WhaleProfileSchema,
-  WhaleSchema,
+  WhalePageSchema,
+  WhaleTrackSchema,
 } from '../src/contracts/index.js';
 
 export interface ContractDefinition {
@@ -111,8 +112,8 @@ const fixtures = {
   capabilities: {
     ...RELEASE_A_CAPABILITIES,
   },
-  'external-sightings': [
-    {
+  'external-sightings': {
+    items: [{
       attribution: 'Synthetic fixture feed',
       ecotypeGuess: 'UNKNOWN',
       externalId: 'fixture-observation-1',
@@ -126,14 +127,15 @@ const fixtures = {
       sourceUrl: 'https://fixtures.invalid/observations/1',
       species: 'Orcinus orca',
       trusted: true,
-    },
-  ],
+    }],
+    page: { hasMore: false, nextCursor: null },
+  },
   health: {
     status: 'ok',
     timestamp: FIXTURE_TIMESTAMP,
   },
-  'historical-sightings': [
-    {
+  'historical-sightings': {
+    items: [{
       ecotypeGuess: 'UNKNOWN',
       id: 'historical-sighting-1',
       latitude: 12.345,
@@ -141,8 +143,9 @@ const fixtures = {
       longitude: -45.678,
       observedAt: '2025-07-16T18:00:00.000Z',
       whaleIds: ['fixture-whale-alpha'],
-    },
-  ],
+    }],
+    page: { hasMore: false, nextCursor: null },
+  },
   identify: {
     confidenceBand: 'high',
     indexVersion: 'fixture-index-v1',
@@ -172,11 +175,32 @@ const fixtures = {
     modelVersion: 'fixture-prediction-v1',
   },
   'safe-error': {
-    error: 'Requested fixture resource was not found.',
+    code: 'NOT_FOUND',
+    message: 'Requested fixture resource was not found.',
+    requestId: 'fixture-request-1',
+    retryable: false,
   },
-  sightings: [sightingFixture],
+  sightings: {
+    items: [sightingFixture],
+    page: { hasMore: false, nextCursor: null },
+  },
   'whale-detail': whaleDetailFixture,
-  whales: [whaleFixture],
+  'whale-track': {
+    catalogId: 'FX-001',
+    points: [{
+      behaviorNotes: 'Synthetic travel notes for contract testing.',
+      id: 'fixture-sighting-1',
+      latitude: 12.345,
+      locationName: 'Fixture Strait',
+      longitude: -45.678,
+      observedAt: FIXTURE_TIMESTAMP,
+    }],
+    whaleId: 'fixture-whale-alpha',
+  },
+  whales: {
+    items: [whaleFixture],
+    page: { hasMore: false, nextCursor: null },
+  },
 } as const;
 
 export const contractDefinitions: readonly ContractDefinition[] = [
@@ -190,7 +214,7 @@ export const contractDefinitions: readonly ContractDefinition[] = [
     fixture: fixtures['external-sightings'],
     jsonSchemaTitle: 'ExternalSightings',
     name: 'external-sightings',
-    schema: z.array(ExternalSightingSchema),
+    schema: ExternalSightingPageSchema,
   },
   {
     fixture: fixtures.health,
@@ -202,7 +226,7 @@ export const contractDefinitions: readonly ContractDefinition[] = [
     fixture: fixtures['historical-sightings'],
     jsonSchemaTitle: 'HistoricalSightings',
     name: 'historical-sightings',
-    schema: z.array(HistoricalSightingSchema),
+    schema: HistoricalSightingPageSchema,
   },
   {
     fixture: fixtures.identify,
@@ -226,7 +250,7 @@ export const contractDefinitions: readonly ContractDefinition[] = [
     fixture: fixtures.sightings,
     jsonSchemaTitle: 'Sightings',
     name: 'sightings',
-    schema: z.array(SightingSchema),
+    schema: SightingPageSchema,
   },
   {
     fixture: fixtures['whale-detail'],
@@ -235,9 +259,15 @@ export const contractDefinitions: readonly ContractDefinition[] = [
     schema: WhaleProfileSchema,
   },
   {
+    fixture: fixtures['whale-track'],
+    jsonSchemaTitle: 'WhaleTrack',
+    name: 'whale-track',
+    schema: WhaleTrackSchema,
+  },
+  {
     fixture: fixtures.whales,
     jsonSchemaTitle: 'Whales',
     name: 'whales',
-    schema: z.array(WhaleSchema),
+    schema: WhalePageSchema,
   },
 ];

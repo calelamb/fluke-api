@@ -1,0 +1,73 @@
+{
+  "$ref": "#/definitions/WhaleTrack",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "WhaleTrack": {
+      "additionalProperties": false,
+      "properties": {
+        "catalogId": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "points": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "behaviorNotes": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "latitude": {
+                "maximum": 90,
+                "minimum": -90,
+                "type": "number"
+              },
+              "locationName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "longitude": {
+                "maximum": 180,
+                "minimum": -180,
+                "type": "number"
+              },
+              "observedAt": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "observedAt",
+              "latitude",
+              "longitude",
+              "locationName",
+              "behaviorNotes"
+            ],
+            "type": "object"
+          },
+          "maxItems": 1000,
+          "type": "array"
+        },
+        "whaleId": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "whaleId",
+        "catalogId",
+        "points"
+      ],
+      "type": "object"
+    }
+  }
+}

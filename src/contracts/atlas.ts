@@ -1,16 +1,17 @@
 import { z } from 'zod';
+import { IsoDateTimeSchema, LatitudeSchema, LongitudeSchema, ProbabilitySchema } from './common.js';
 
 export const PredictionCellSchema = z.object({
-  lat: z.number(),
-  lng: z.number(),
-  probability: z.number(),
+  lat: LatitudeSchema,
+  lng: LongitudeSchema,
+  probability: ProbabilitySchema,
 });
 
 export const PredictionSchema = z.object({
   cells: z.array(PredictionCellSchema),
-  confidence: z.number(),
+  confidence: ProbabilitySchema,
   modelVersion: z.string(),
-  computedAt: z.string(),
+  computedAt: IsoDateTimeSchema,
 });
 
 export type PredictionCell = z.infer<typeof PredictionCellSchema>;

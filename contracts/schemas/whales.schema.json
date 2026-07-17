@@ -3,168 +3,225 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "Whales": {
-      "items": {
-        "additionalProperties": false,
-        "properties": {
-          "biography": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "birthYear": {
-            "anyOf": [
-              {
-                "type": "integer"
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "biography": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "catalogId": {
-            "type": "string"
-          },
-          "deathYear": {
-            "anyOf": [
-              {
-                "type": "integer"
+              "birthYear": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "distinguishingMarks": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "ecotype": {
-            "enum": [
-              "RESIDENT",
-              "BIGGS",
-              "OFFSHORE",
-              "UNKNOWN"
-            ],
-            "type": "string"
-          },
-          "heroImageUrl": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "notableEvents": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "date": {
-                  "type": "string"
-                },
-                "source": {
-                  "type": "string"
-                },
-                "summary": {
-                  "type": "string"
-                },
-                "type": {
-                  "enum": [
-                    "birth",
-                    "death",
-                    "loss",
-                    "capture",
-                    "release",
-                    "pod-switch",
-                    "first-documented",
-                    "milestone"
+              "catalogId": {
+                "type": "string"
+              },
+              "deathYear": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "distinguishingMarks": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "ecotype": {
+                "enum": [
+                  "RESIDENT",
+                  "BIGGS",
+                  "OFFSHORE",
+                  "UNKNOWN"
+                ],
+                "type": "string"
+              },
+              "heroImageUrl": {
+                "anyOf": [
+                  {
+                    "format": "uri",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "notableEvents": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "date": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "summary": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "enum": [
+                        "birth",
+                        "death",
+                        "loss",
+                        "capture",
+                        "release",
+                        "pod-switch",
+                        "first-documented",
+                        "milestone"
+                      ],
+                      "type": "string"
+                    },
+                    "year": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "year",
+                    "type",
+                    "summary"
                   ],
-                  "type": "string"
+                  "type": "object"
                 },
-                "year": {
-                  "type": "number"
-                }
+                "type": "array"
               },
-              "required": [
-                "year",
-                "type",
-                "summary"
-              ],
-              "type": "object"
+              "pod": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sex": {
+                "enum": [
+                  "MALE",
+                  "FEMALE",
+                  "UNKNOWN"
+                ],
+                "type": "string"
+              },
+              "sourceCitations": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "format": "uri",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "url"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "status": {
+                "enum": [
+                  "ALIVE",
+                  "DECEASED",
+                  "UNKNOWN"
+                ],
+                "type": "string"
+              }
             },
-            "type": "array"
-          },
-          "pod": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "sex": {
-            "enum": [
-              "MALE",
-              "FEMALE",
-              "UNKNOWN"
+            "required": [
+              "id",
+              "catalogId",
+              "name",
+              "ecotype",
+              "pod",
+              "sex",
+              "birthYear",
+              "deathYear",
+              "status",
+              "biography",
+              "distinguishingMarks",
+              "heroImageUrl",
+              "notableEvents",
+              "sourceCitations"
             ],
-            "type": "string"
+            "type": "object"
           },
-          "sourceCitations": {
-            "items": {
+          "maxItems": 50,
+          "type": "array"
+        },
+        "page": {
+          "anyOf": [
+            {
               "additionalProperties": false,
               "properties": {
-                "label": {
-                  "type": "string"
+                "hasMore": {
+                  "const": true,
+                  "type": "boolean"
                 },
-                "url": {
+                "nextCursor": {
+                  "maxLength": 512,
+                  "minLength": 1,
                   "type": "string"
                 }
               },
               "required": [
-                "label",
-                "url"
+                "hasMore",
+                "nextCursor"
               ],
               "type": "object"
             },
-            "type": "array"
-          },
-          "status": {
-            "enum": [
-              "ALIVE",
-              "DECEASED",
-              "UNKNOWN"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "catalogId",
-          "name",
-          "ecotype",
-          "pod",
-          "sex",
-          "birthYear",
-          "deathYear",
-          "status",
-          "biography",
-          "distinguishingMarks",
-          "heroImageUrl",
-          "notableEvents",
-          "sourceCitations"
-        ],
-        "type": "object"
+            {
+              "additionalProperties": false,
+              "properties": {
+                "hasMore": {
+                  "const": false,
+                  "type": "boolean"
+                },
+                "nextCursor": {
+                  "type": "null"
+                }
+              },
+              "required": [
+                "hasMore",
+                "nextCursor"
+              ],
+              "type": "object"
+            }
+          ]
+        }
       },
-      "type": "array"
+      "required": [
+        "items",
+        "page"
+      ],
+      "type": "object"
     }
   }
 }

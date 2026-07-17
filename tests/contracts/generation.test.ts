@@ -92,7 +92,19 @@ describe('contract generation', () => {
       const safeError = JSON.parse(
         await readFile(join(root, 'fixtures', 'safe-error.json'), 'utf8'),
       ) as unknown;
-      expect(safeError).toEqual({ error: 'Requested fixture resource was not found.' });
+      expect(safeError).toEqual({
+        code: 'NOT_FOUND',
+        message: 'Requested fixture resource was not found.',
+        requestId: 'fixture-request-1',
+        retryable: false,
+      });
+
+      const whaleTrack = JSON.parse(
+        await readFile(join(root, 'fixtures', 'whale-track.json'), 'utf8'),
+      ) as { catalogId?: unknown; points?: unknown; whaleId?: unknown };
+      expect(whaleTrack.whaleId).toBe('fixture-whale-alpha');
+      expect(whaleTrack.catalogId).toBe('FX-001');
+      expect(whaleTrack.points).toHaveLength(1);
     });
   });
 

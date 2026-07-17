@@ -3,62 +3,118 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "HistoricalSightings": {
-      "items": {
-        "additionalProperties": false,
-        "properties": {
-          "ecotypeGuess": {
-            "anyOf": [
-              {
-                "enum": [
-                  "RESIDENT",
-                  "BIGGS",
-                  "OFFSHORE",
-                  "UNKNOWN"
-                ],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "ecotypeGuess": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "RESIDENT",
+                      "BIGGS",
+                      "OFFSHORE",
+                      "UNKNOWN"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "id": {
                 "type": "string"
               },
-              {
-                "type": "null"
+              "latitude": {
+                "maximum": 90,
+                "minimum": -90,
+                "type": "number"
+              },
+              "locationName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "longitude": {
+                "maximum": 180,
+                "minimum": -180,
+                "type": "number"
+              },
+              "observedAt": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "whaleIds": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
               }
-            ]
-          },
-          "id": {
-            "type": "string"
-          },
-          "latitude": {
-            "type": "number"
-          },
-          "locationName": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "longitude": {
-            "type": "number"
-          },
-          "observedAt": {
-            "type": "string"
-          },
-          "whaleIds": {
-            "items": {
-              "type": "string"
             },
-            "type": "array"
-          }
+            "required": [
+              "id",
+              "observedAt",
+              "latitude",
+              "longitude",
+              "locationName",
+              "ecotypeGuess",
+              "whaleIds"
+            ],
+            "type": "object"
+          },
+          "maxItems": 100,
+          "type": "array"
         },
-        "required": [
-          "id",
-          "observedAt",
-          "latitude",
-          "longitude",
-          "locationName",
-          "ecotypeGuess",
-          "whaleIds"
-        ],
-        "type": "object"
+        "page": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "hasMore": {
+                  "const": true,
+                  "type": "boolean"
+                },
+                "nextCursor": {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "hasMore",
+                "nextCursor"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "hasMore": {
+                  "const": false,
+                  "type": "boolean"
+                },
+                "nextCursor": {
+                  "type": "null"
+                }
+              },
+              "required": [
+                "hasMore",
+                "nextCursor"
+              ],
+              "type": "object"
+            }
+          ]
+        }
       },
-      "type": "array"
+      "required": [
+        "items",
+        "page"
+      ],
+      "type": "object"
     }
   }
 }

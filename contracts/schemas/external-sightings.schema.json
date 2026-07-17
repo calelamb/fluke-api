@@ -3,93 +3,154 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "ExternalSightings": {
-      "items": {
-        "additionalProperties": false,
-        "properties": {
-          "attribution": {
-            "type": "string"
-          },
-          "ecotypeGuess": {
-            "anyOf": [
-              {
-                "enum": [
-                  "RESIDENT",
-                  "BIGGS",
-                  "OFFSHORE",
-                  "UNKNOWN"
-                ],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "attribution": {
                 "type": "string"
               },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "externalId": {
-            "type": "string"
-          },
-          "groupSize": {
-            "anyOf": [
-              {
-                "type": "integer"
+              "ecotypeGuess": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "RESIDENT",
+                      "BIGGS",
+                      "OFFSHORE",
+                      "UNKNOWN"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
-              {
-                "type": "null"
+              "externalId": {
+                "type": "string"
+              },
+              "groupSize": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "latitude": {
+                "maximum": 90,
+                "minimum": -90,
+                "type": "number"
+              },
+              "longitude": {
+                "maximum": 180,
+                "minimum": -180,
+                "type": "number"
+              },
+              "notes": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "observedAt": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "sourceUrl": {
+                "anyOf": [
+                  {
+                    "format": "uri",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "species": {
+                "type": "string"
+              },
+              "trusted": {
+                "type": "boolean"
               }
-            ]
+            },
+            "required": [
+              "id",
+              "source",
+              "externalId",
+              "observedAt",
+              "latitude",
+              "longitude",
+              "species",
+              "ecotypeGuess",
+              "groupSize",
+              "attribution",
+              "sourceUrl",
+              "notes",
+              "trusted"
+            ],
+            "type": "object"
           },
-          "id": {
-            "type": "string"
-          },
-          "latitude": {
-            "type": "number"
-          },
-          "longitude": {
-            "type": "number"
-          },
-          "notes": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "observedAt": {
-            "type": "string"
-          },
-          "source": {
-            "type": "string"
-          },
-          "sourceUrl": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "species": {
-            "type": "string"
-          },
-          "trusted": {
-            "type": "boolean"
-          }
+          "maxItems": 100,
+          "type": "array"
         },
-        "required": [
-          "id",
-          "source",
-          "externalId",
-          "observedAt",
-          "latitude",
-          "longitude",
-          "species",
-          "ecotypeGuess",
-          "groupSize",
-          "attribution",
-          "sourceUrl",
-          "notes",
-          "trusted"
-        ],
-        "type": "object"
+        "page": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "hasMore": {
+                  "const": true,
+                  "type": "boolean"
+                },
+                "nextCursor": {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "hasMore",
+                "nextCursor"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "hasMore": {
+                  "const": false,
+                  "type": "boolean"
+                },
+                "nextCursor": {
+                  "type": "null"
+                }
+              },
+              "required": [
+                "hasMore",
+                "nextCursor"
+              ],
+              "type": "object"
+            }
+          ]
+        }
       },
-      "type": "array"
+      "required": [
+        "items",
+        "page"
+      ],
+      "type": "object"
     }
   }
 }
