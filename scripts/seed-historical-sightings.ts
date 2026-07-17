@@ -76,7 +76,7 @@ async function main() {
       latitude: number;
       longitude: number;
       locationName: string;
-      ecotypeGuess: 'RESIDENT' | 'TRANSIENT';
+      ecotypeGuess: 'RESIDENT' | 'BIGGS';
       groupSize: number;
       observerEmail: string;
       status: 'APPROVED';
@@ -115,7 +115,7 @@ async function main() {
           latitude: lat,
           longitude: lng,
           locationName: hotspot.name,
-          ecotypeGuess: pod === 'BIGGS' ? 'TRANSIENT' : 'RESIDENT',
+          ecotypeGuess: pod === 'BIGGS' ? 'BIGGS' : 'RESIDENT',
           groupSize,
           observerEmail: 'seed@fluke.local',
           status: 'APPROVED',

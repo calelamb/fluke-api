@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
+import type { Prisma } from '@prisma/client';
 import {
   SubmitSightingPayloadSchema,
   type IdConfidence,
@@ -125,8 +126,8 @@ const sightingsRoutes: FastifyPluginAsync = async (fastify) => {
       whaleId?: string;
     };
 
-    const where: any = { status: 'APPROVED' };
-    const externalWhere: any = {};
+    const where: Prisma.SightingWhereInput = { status: 'APPROVED' };
+    const externalWhere: Prisma.ExternalSightingWhereInput = {};
 
     if (q.from || q.to) {
       where.observedAt = {};
@@ -173,30 +174,28 @@ const sightingsRoutes: FastifyPluginAsync = async (fastify) => {
     // External sightings (Acartia, GBIF, etc.) are filtered by ecotype when a
     // pod is requested (resident pods → RESIDENT ecotype; Bigg's → BIGGS).
     // They have no whale-link join, so whaleId queries skip them entirely.
-    let externalSightings: Array<{
-      id: string;
-      observedAt: Date;
-      latitude: any;
-      longitude: any;
-      ecotypeGuess: string | null;
-    }> = [];
-
-    if (!q.whaleId) {
-      if (q.pod === 'BIGGS') externalWhere.ecotypeGuess = 'BIGGS';
-      else if (q.pod === 'J' || q.pod === 'K' || q.pod === 'L') externalWhere.ecotypeGuess = 'RESIDENT';
-
-      externalSightings = await prisma.externalSighting.findMany({
-        where: externalWhere,
-        orderBy: { observedAt: 'asc' },
-        select: {
-          id: true,
-          observedAt: true,
-          latitude: true,
-          longitude: true,
-          ecotypeGuess: true,
-        },
-      });
-    }
+    const externalEcotype = q.pod === 'BIGGS'
+      ? 'BIGGS'
+      : q.pod === 'J' || q.pod === 'K' || q.pod === 'L'
+        ? 'RESIDENT'
+        : undefined;
+    const filteredExternalWhere: Prisma.ExternalSightingWhereInput = {
+      ...externalWhere,
+      ...(externalEcotype ? { ecotypeGuess: externalEcotype } : {}),
+    };
+    const externalSightings = q.whaleId
+      ? []
+      : await prisma.externalSighting.findMany({
+          where: filteredExternalWhere,
+          orderBy: { observedAt: 'asc' },
+          select: {
+            id: true,
+            observedAt: true,
+            latitude: true,
+            longitude: true,
+            ecotypeGuess: true,
+          },
+        });
 
     reply.header('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
 

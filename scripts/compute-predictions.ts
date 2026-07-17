@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, type Prisma } from '@prisma/client';
 import {
   computeTransitions,
   predictNext,
@@ -81,7 +81,7 @@ async function main() {
 
   console.log('[predict] computing per-pod predictions...');
   for (const pod of ['J', 'K', 'L', 'BIGGS']) {
-    const podWhereClause: any =
+    const podWhereClause: Prisma.WhaleWhereInput =
       pod === 'BIGGS'
         ? { ecotype: 'BIGGS' }
         : { pod };

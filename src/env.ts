@@ -55,17 +55,23 @@ const envSchema = z
     }
   });
 
-const parsedEnv = envSchema.safeParse(process.env);
+export type Env = z.infer<typeof envSchema>;
 
-if (!parsedEnv.success) {
-  const details = parsedEnv.error.issues
-    .map((issue) => `- ${issue.path.join('.')}: ${issue.message}`)
-    .join('\n');
+export function parseEnv(input: NodeJS.ProcessEnv): Env {
+  const parsedEnv = envSchema.safeParse(input);
 
-  throw new Error(
-    `Invalid API environment.\n${details}\n\nCopy apps/api/.env.example to apps/api/.env and fill in the Neon connection strings, JWT_SECRET, and WEB_ORIGIN.`,
-  );
+  if (!parsedEnv.success) {
+    const details = parsedEnv.error.issues
+      .map((issue) => `- ${issue.path.join('.')}: ${issue.message}`)
+      .join('\n');
+
+    throw new Error(
+      `Invalid API environment.\n${details}\n\nCopy .env.example to .env and fill in the database connection strings, JWT_SECRET, and WEB_ORIGIN.`,
+    );
+  }
+
+  return parsedEnv.data;
 }
 
-export const env = parsedEnv.data;
+export const env = parseEnv(process.env);
 export const isProduction = env.NODE_ENV === 'production';

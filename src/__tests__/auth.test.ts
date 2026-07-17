@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parseEnv } from '../env.js';
 
 vi.mock('../db.js', () => ({
   prisma: {
@@ -29,6 +30,23 @@ const TEST_USER = {
   role: 'ADMIN' as const,
   createdAt: new Date(),
 };
+
+const VALID_ENV: NodeJS.ProcessEnv = {
+  NODE_ENV: 'test',
+  DATABASE_URL: 'postgresql://test:test@localhost:5432/test',
+  DIRECT_URL: 'postgresql://test:test@localhost:5432/test',
+  JWT_SECRET: 'x'.repeat(32),
+};
+
+describe('API environment', () => {
+  it('rejects an empty JWT secret', () => {
+    expect(() => parseEnv({ ...VALID_ENV, JWT_SECRET: '' })).toThrow(/JWT_SECRET/);
+  });
+
+  it('rejects a short JWT secret', () => {
+    expect(() => parseEnv({ ...VALID_ENV, JWT_SECRET: 'short' })).toThrow(/JWT_SECRET/);
+  });
+});
 
 describe('auth routes', () => {
   let app: FastifyInstance;

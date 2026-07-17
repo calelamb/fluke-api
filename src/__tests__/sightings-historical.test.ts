@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import type { WhaleDTO } from '../contracts/index.js';
 
 vi.mock('../db.js', () => ({
   prisma: {
@@ -12,6 +13,9 @@ vi.mock('../db.js', () => ({
       create: vi.fn(),
       findUnique: vi.fn(),
       update: vi.fn(),
+    },
+    externalSighting: {
+      findMany: vi.fn(),
     },
     sightingWhale: { upsert: vi.fn() },
     auditLog: { create: vi.fn() },
@@ -35,6 +39,7 @@ describe('GET /api/v1/sightings/historical', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(prisma.externalSighting.findMany).mockResolvedValue([]);
   });
 
   it('returns approved sightings within a date range', async () => {
@@ -103,8 +108,8 @@ describe('GET /api/v1/sightings/historical', () => {
       },
     ] as never);
 
-    const whales = (await app.inject({ method: 'GET', url: '/api/v1/whales' })).json();
-    const jPodWhale = whales.find((w: any) => w.pod === 'J');
+    const whales = (await app.inject({ method: 'GET', url: '/api/v1/whales' })).json<WhaleDTO[]>();
+    const jPodWhale = whales.find((whale) => whale.pod === 'J');
     if (!jPodWhale) return; // no J-pod whale seeded; skip
     const res = await app.inject({
       method: 'GET',
