@@ -50,6 +50,24 @@ function positiveInteger(value: number, name: string): number {
   return value;
 }
 
+function isCanonicalSerializedError(payload: unknown, requestId: string): boolean {
+  const serialized = typeof payload === 'string'
+    ? payload
+    : Buffer.isBuffer(payload)
+      ? payload.toString('utf8')
+      : undefined;
+  if (serialized === undefined) {
+    return false;
+  }
+
+  try {
+    const parsed = SafeErrorSchema.safeParse(JSON.parse(serialized));
+    return parsed.success && parsed.data.requestId === requestId;
+  } catch {
+    return false;
+  }
+}
+
 async function defaultReadinessProbe(): Promise<void> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_resolve, reject) => {
@@ -104,12 +122,17 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       return payload;
     }
 
+    const failure = classifyStatus(reply.statusCode, request.id);
     const safePayload = SafeErrorSchema.safeParse(payload);
-    if (safePayload.success && safePayload.data.requestId === request.id) {
+    if (
+      failure.statusCode === reply.statusCode
+      && safePayload.success
+      && safePayload.data.requestId === request.id
+    ) {
       return safePayload.data;
     }
 
-    const failure = classifyStatus(reply.statusCode, request.id);
+    reply.code(failure.statusCode);
     const diagnostics = {
       failureKind: failure.kind,
       requestId: request.id,
@@ -121,6 +144,34 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       request.log.warn(diagnostics, 'request rejected');
     }
     return failure.body;
+  });
+  app.addHook('onSend', (request, reply, payload, done) => {
+    if (reply.statusCode < 400) {
+      done(null, payload);
+      return;
+    }
+
+    const failure = classifyStatus(reply.statusCode, request.id);
+    if (
+      failure.statusCode === reply.statusCode
+      && isCanonicalSerializedError(payload, request.id)
+    ) {
+      done(null, payload);
+      return;
+    }
+
+    reply.code(failure.statusCode).type('application/json');
+    const diagnostics = {
+      failureKind: failure.kind,
+      requestId: request.id,
+      statusCode: failure.statusCode,
+    };
+    if (failure.statusCode >= 500) {
+      request.log.error(diagnostics, 'non-canonical error response replaced');
+    } else {
+      request.log.warn(diagnostics, 'non-canonical error response replaced');
+    }
+    done(null, JSON.stringify(failure.body));
   });
   app.setNotFoundHandler(async (request, reply) => {
     const failure = classifyStatus(404, request.id);

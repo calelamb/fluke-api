@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SafeErrorSchema } from '../src/contracts/index.js';
 import type { BuildAppOptions } from '../src/app.js';
@@ -159,5 +160,71 @@ describe('global safe error boundary', () => {
       code: 'RATE_LIMITED',
       retryable: true,
     });
+  });
+
+  it.each([
+    {
+      payload: 'string secret diagnostic',
+      route: '/test/string-error',
+    },
+    {
+      payload: Buffer.from('buffer secret diagnostic'),
+      route: '/test/buffer-error',
+    },
+    {
+      payload: Readable.from(['stream secret diagnostic']),
+      route: '/test/stream-error',
+    },
+  ])('canonicalizes non-object error payloads from $route', async ({ payload, route }) => {
+    const app = await createApp();
+    app.get(route, async (_request, reply) => reply.code(503).send(payload));
+
+    const response = await app.inject({ method: 'GET', url: route });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.headers['content-type']).toContain('application/json');
+    expectSafeError(response.json(), {
+      code: 'UPSTREAM_UNAVAILABLE',
+      retryable: true,
+    });
+    expect(response.body).not.toContain('secret diagnostic');
+  });
+
+  it('normalizes an unknown server error status to the canonical 500 status', async () => {
+    const app = await createApp();
+    app.get('/test/not-implemented', async (_request, reply) => reply.code(501).send({
+      error: 'unimplemented secret diagnostic',
+    }));
+
+    const response = await app.inject({ method: 'GET', url: '/test/not-implemented' });
+
+    expect(response.statusCode).toBe(500);
+    expectSafeError(response.json(), {
+      code: 'INTERNAL_ERROR',
+      retryable: false,
+    });
+    expect(response.body).not.toContain('unimplemented secret diagnostic');
+  });
+
+  it('preserves successful Buffer and stream payloads byte-for-byte', async () => {
+    const expectedBuffer = Buffer.from([0, 1, 2, 3, 254, 255]);
+    const expectedStream = 'successful stream payload';
+    const app = await createApp();
+    app.get('/test/success-buffer', async (_request, reply) => reply
+      .type('application/octet-stream')
+      .send(expectedBuffer));
+    app.get('/test/success-stream', async (_request, reply) => reply
+      .type('text/plain')
+      .send(Readable.from([expectedStream])));
+
+    const [bufferResponse, streamResponse] = await Promise.all([
+      app.inject({ method: 'GET', url: '/test/success-buffer' }),
+      app.inject({ method: 'GET', url: '/test/success-stream' }),
+    ]);
+
+    expect(bufferResponse.statusCode).toBe(200);
+    expect(bufferResponse.rawPayload).toEqual(expectedBuffer);
+    expect(streamResponse.statusCode).toBe(200);
+    expect(streamResponse.body).toBe(expectedStream);
   });
 });
