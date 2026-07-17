@@ -58,3 +58,43 @@ disabled by the existing feature firewall.
   repeatable follow-up integration testing; no production data was accessed.
 - `prisma format` normalized existing schema alignment, so the schema diff contains
   whitespace-only changes outside the modified models in addition to Task 2 semantics.
+
+## Review follow-up
+
+### RED evidence
+
+- Added an observer-with-password login regression and a validly signed observer JWT
+  regression, then ran `pnpm vitest run src/__tests__/auth.test.ts tests/release-config.test.ts`.
+  Both authorization tests failed as expected: observer password login returned 200
+  instead of 401, and the observer JWT reached `/auth/me` with 200 instead of 401.
+- Added bcrypt call assertions for both passwordless and password-backed observers.
+  The passwordless case then failed because the dummy bcrypt path ran before role
+  rejection; moving runtime role validation ahead of every bcrypt call made it green.
+- The release-marker coupling test passed immediately after pointing it at the Task 2
+  migration; this was a test-correctness repair rather than new runtime behavior.
+- The staged migration test passed on its first real PostgreSQL run. It verifies the
+  existing additive SQL rather than driving a new implementation change.
+
+### Fixes
+
+- Password login now permits only `ADMIN` and `MODERATOR` roles before bcrypt or JWT
+  issuance. An `OBSERVER` with a valid password receives 401 and no admin cookie.
+- `requireAdmin` now validates the decoded JWT shape and role at runtime; a correctly
+  signed token with an observer/legacy role fails closed.
+- The release configuration test reads the observer-submissions migration itself and
+  couples the readiness marker to its enum, ownership-column, and idempotency-table SQL.
+- The PostgreSQL integration suite now creates a unique temporary schema, deploys only
+  through `20260716220000_add_job_operations`, inserts legacy admin/moderator users and
+  a known sighting, then adds/deploys Task 2. It verifies exact hashes, identity fields,
+  moderator ownership, sighting data, null observer ownership, and session version 1.
+  The temporary schema is dropped in `finally`; no production database is accessed.
+
+### GREEN evidence
+
+- Focused review suite with real PostgreSQL 16:
+  `RUN_POSTGRES_INTEGRATION=true ... pnpm vitest run src/__tests__/auth.test.ts tests/release-config.test.ts tests/integration/observer-submissions.postgres.test.ts tests/migration-readiness.test.ts`
+  passed 4 files and 38 tests, including the staged upgrade.
+- `pnpm typecheck`: passed.
+- `pnpm lint`: passed.
+- Fresh full `pnpm test`: 39 files passed, 3 PostgreSQL-only files skipped; 284 tests
+  passed, 13 skipped, 0 failed.

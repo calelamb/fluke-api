@@ -127,15 +127,15 @@ describe('release configuration', () => {
   it('keeps the required migration marker aligned with the latest migration', () => {
     const readiness = readRepositoryFile('src/ops/migration-readiness.ts');
     const migration = readRepositoryFile(
-      'prisma/migrations/20260716220000_add_job_operations/migration.sql',
+      'prisma/migrations/20260717170000_add_observer_submissions/migration.sql',
     );
 
     expect(readiness).toContain(
       "export const REQUIRED_MIGRATION = '20260717170000_add_observer_submissions'",
     );
-    expect(migration).toContain('CREATE TABLE "job_leases"');
-    expect(migration).toContain('CREATE TABLE "job_run_events"');
-    expect(migration).toContain('job_run_events_are_append_only');
+    expect(migration).toContain(`ALTER TYPE "UserRole" ADD VALUE 'OBSERVER'`);
+    expect(migration).toContain('CREATE TABLE "submission_idempotencies"');
+    expect(migration).toContain('ADD COLUMN     "observer_user_id" TEXT');
   });
 
   it('uses an OpenSSL-equipped base for Prisma generation and runtime', () => {

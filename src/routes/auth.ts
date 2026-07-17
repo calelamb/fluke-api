@@ -3,7 +3,12 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import { env } from '../env.js';
-import { clearAdminCookie, requireAdmin, setAdminCookie } from '../lib/auth.js';
+import {
+  clearAdminCookie,
+  isAdminRole,
+  requireAdmin,
+  setAdminCookie,
+} from '../lib/auth.js';
 
 const LoginBody = z.object({
   email: z.string().email(),
@@ -20,7 +25,14 @@ export default async function authRoutes(app: FastifyInstance) {
     const { email, password } = parsed.data;
     const user = await prisma.user.findUnique({ where: { email } });
 
-    if (!user?.passwordHash || !user.email) {
+    if (!user) {
+      await bcrypt.compare(password, '$2a$12$invalidplaceholderhashvalueplaceholder');
+      return reply.code(401).send({ error: 'Invalid credentials' });
+    }
+    if (!isAdminRole(user.role)) {
+      return reply.code(401).send({ error: 'Invalid credentials' });
+    }
+    if (!user.passwordHash || !user.email) {
       await bcrypt.compare(password, '$2a$12$invalidplaceholderhashvalueplaceholder');
       return reply.code(401).send({ error: 'Invalid credentials' });
     }

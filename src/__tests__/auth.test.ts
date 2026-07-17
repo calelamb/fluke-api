@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import type { FastifyInstance } from 'fastify';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseEnv } from '../env.js';
 
 vi.mock('../db.js', () => ({
@@ -69,6 +69,10 @@ describe('auth routes', () => {
     vi.clearAllMocks();
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   describe('POST /api/v1/auth/login', () => {
     it('rejects invalid request bodies', async () => {
       const response = await app.inject({
@@ -106,6 +110,7 @@ describe('auth routes', () => {
     });
 
     it('returns 401 for a passwordless observer identity', async () => {
+      const compare = vi.spyOn(bcrypt, 'compare');
       vi.mocked(prisma.user.findUnique).mockResolvedValue({
         ...TEST_USER,
         appleSub: 'apple-observer-sub',
@@ -121,6 +126,26 @@ describe('auth routes', () => {
       });
 
       expect(response.statusCode).toBe(401);
+      expect(compare).not.toHaveBeenCalled();
+    });
+
+    it('returns 401 without an admin cookie for an observer with a password', async () => {
+      const compare = vi.spyOn(bcrypt, 'compare');
+      vi.mocked(prisma.user.findUnique).mockResolvedValue({
+        ...TEST_USER,
+        appleSub: 'apple-observer-with-password-sub',
+        role: 'OBSERVER',
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: { email: TEST_USER.email, password: 'correct-horse-battery-staple' },
+      });
+
+      expect(response.statusCode).toBe(401);
+      expect(response.headers['set-cookie']).toBeUndefined();
+      expect(compare).not.toHaveBeenCalled();
     });
 
     it('sets a signed admin cookie on successful login', async () => {
@@ -170,6 +195,21 @@ describe('auth routes', () => {
       expect(body.userId).toBe(TEST_USER.id);
       expect(body.email).toBe(TEST_USER.email);
       expect(body.role).toBe('ADMIN');
+    });
+
+    it('rejects a validly signed observer token on admin routes', async () => {
+      const token = app.jwt.sign(
+        { userId: 'observer-uuid', email: 'observer@example.com', role: 'OBSERVER' },
+        { expiresIn: '7d' },
+      );
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/auth/me',
+        cookies: { fluke_admin: token },
+      });
+
+      expect(response.statusCode).toBe(401);
     });
   });
 

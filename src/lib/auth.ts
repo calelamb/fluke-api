@@ -7,6 +7,20 @@ export interface AdminClaims {
   role: 'ADMIN' | 'MODERATOR';
 }
 
+export function isAdminRole(role: unknown): role is AdminClaims['role'] {
+  return role === 'ADMIN' || role === 'MODERATOR';
+}
+
+function isAdminClaims(value: unknown): value is AdminClaims {
+  if (typeof value !== 'object' || value === null) return false;
+  const claims = value as Record<string, unknown>;
+  return (
+    typeof claims.userId === 'string' &&
+    typeof claims.email === 'string' &&
+    isAdminRole(claims.role)
+  );
+}
+
 declare module 'fastify' {
   interface FastifyRequest {
     admin?: AdminClaims;
@@ -15,7 +29,8 @@ declare module 'fastify' {
 
 export async function requireAdmin(req: FastifyRequest, reply: FastifyReply) {
   try {
-    const decoded = await req.jwtVerify<AdminClaims>();
+    const decoded = await req.jwtVerify<Record<string, unknown>>();
+    if (!isAdminClaims(decoded)) throw new Error('Invalid admin claims');
     req.admin = decoded;
   } catch {
     reply.code(401).send({ error: 'Unauthorized' });
