@@ -33,6 +33,14 @@ describe('release configuration', () => {
     expect(workflow).toContain('gitleaks git --log-opts=--all --redact --no-banner .');
   });
 
+  it('verifies migrations and repeatable canonical seed data in CI', () => {
+    const workflow = readRepositoryFile('.github/workflows/ci.yml');
+
+    expect(workflow).toContain('- run: pnpm db:migrate:status');
+    expect(workflow.match(/- run: pnpm db:seed$/gmu)).toHaveLength(2);
+    expect(workflow).toContain('- run: pnpm db:verify-seed');
+  });
+
   it('grants read-only PR access and disables Gitleaks comments', () => {
     const workflow = readRepositoryFile('.github/workflows/ci.yml');
 
@@ -130,6 +138,10 @@ describe('release configuration', () => {
     expect(readme).toContain('NODE_ENV=production');
     expect(readme).toContain('UPLOADS_DIR=/app/uploads');
     expect(readme).toContain('gitleaks git --log-opts=--all --redact --no-banner .');
+    expect(readme).toContain('docs/deployment.md');
+    expect(readme).toContain('docs/rollback.md');
+    expect(readme).toContain('docs/restore.md');
+    expect(readme).toContain('docs/scheduled-jobs.md');
   });
 
   it('installs bounded signal shutdown and disconnects Prisma', () => {

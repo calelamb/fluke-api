@@ -80,7 +80,7 @@ Never commit `.env` or production credentials. CI uses isolated, synthetic test-
 ## Health checks
 
 - `GET /api/v1/health` is a liveness check. It returns `200` without touching the database, so an orchestrator only restarts a process that cannot serve HTTP.
-- `GET /api/v1/ready` is a readiness check. It runs a bounded `SELECT 1` probe and returns `200 {"status":"ready"}` when PostgreSQL is reachable. Probe failures return `503 {"status":"unready"}` without exposing database errors.
+- `GET /api/v1/ready` is a readiness check. It runs a bounded database probe and requires this image's schema migration with no unresolved migrations. A database migrated beyond the image remains ready, which preserves application rollback. Probe failures return `503 {"status":"unready"}` without exposing database errors.
 
 Use readiness for release health checks and traffic admission. Do not use liveness to decide whether a database migration succeeded.
 
@@ -125,11 +125,18 @@ pnpm db:migrate:deploy
 
 1. Create a Railway service from this repository and attach a PostgreSQL service or approved external database.
 2. Configure the validated environment variables in Railway; keep secrets out of build arguments and source control.
-3. Run `pnpm db:migrate:deploy` as a separate production release step against `DIRECT_URL`.
+3. Confirm Railway runs `pnpm db:migrate:deploy` from `preDeployCommand` against `DIRECT_URL`.
 4. Deploy the image and require the Railway readiness check to pass before routing traffic.
 5. Probe both `/api/v1/health` and `/api/v1/ready` on the public API origin after release.
 
 A Railway deployment marked successful is not sufficient on its own: the public readiness probe must return the expected `200` response before the release is certified.
+
+Operational procedures:
+
+- [Deployment](docs/deployment.md)
+- [Application rollback](docs/rollback.md)
+- [Database restore](docs/restore.md)
+- [Scheduled jobs](docs/scheduled-jobs.md)
 
 ## CI release gates
 
