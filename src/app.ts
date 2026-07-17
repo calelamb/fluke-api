@@ -19,9 +19,9 @@ import {
 } from './features.js';
 import { boundedDatabaseRead } from './lib/bounded-database-read.js';
 import { assertRequiredMigration } from './ops/migration-readiness.js';
-import { resolveUploadsDir } from './lib/storage.js';
+import { getStorageBackend, resolveUploadsDir } from './lib/storage.js';
 import type { StorageBackend } from './lib/storage.js';
-import type { TokenCrypto } from './lib/token-crypto.js';
+import { decodeTokenEncryptionKey, TokenCrypto } from './lib/token-crypto.js';
 import { resolveRequestId } from './lib/request-id.js';
 import { classifyError, classifyStatus } from './lib/safe-errors.js';
 import {
@@ -42,7 +42,7 @@ import sightingPhotosRoutes from './routes/sighting-photos.js';
 import sightingSubmissionRoutes from './routes/sighting-submissions.js';
 import sightingsRoutes from './routes/sightings.js';
 import whalesRoutes from './routes/whales.js';
-import type { AppleAuthService } from './services/apple-auth.js';
+import { AppleAuthService } from './services/apple-auth.js';
 
 export interface ObserverAuthDependencies {
   readonly appleAuth: Pick<
@@ -68,6 +68,30 @@ const READINESS_TIMEOUT_MS = 5_000;
 const PUBLIC_READ_RATE_LIMIT_MAX = 120;
 const PUBLIC_READ_TIMEOUT_MS = 5_000;
 const STORAGE_OPERATIONS = new Set(['delete', 'presign', 'put']);
+
+function environmentObserverAuthDependencies(): ObserverAuthDependencies | undefined {
+  if (
+    env.APPLE_CLIENT_ID === undefined
+    || env.APPLE_TEAM_ID === undefined
+    || env.APPLE_KEY_ID === undefined
+    || env.APPLE_PRIVATE_KEY === undefined
+    || env.APPLE_TOKEN_ENCRYPTION_KEY === undefined
+  ) {
+    return undefined;
+  }
+
+  const tokenCrypto = new TokenCrypto(decodeTokenEncryptionKey(env.APPLE_TOKEN_ENCRYPTION_KEY));
+  return Object.freeze({
+    appleAuth: new AppleAuthService({
+      clientId: env.APPLE_CLIENT_ID,
+      keyId: env.APPLE_KEY_ID,
+      privateKeyPem: env.APPLE_PRIVATE_KEY,
+      teamId: env.APPLE_TEAM_ID,
+    }),
+    storage: getStorageBackend(),
+    tokenCrypto,
+  });
+}
 
 interface ErrorDiagnosticContext {
   readonly kind: string;
@@ -148,8 +172,12 @@ async function defaultReadinessProbe(): Promise<void> {
 }
 
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
+  const resolvedFeatures = validateFeatureConfig(options.features ?? environmentFeatures);
+  const environmentObserverAuth = options.observerAuth === undefined && resolvedFeatures.accounts
+    ? environmentObserverAuthDependencies()
+    : undefined;
   const resolvedOptions = Object.freeze({
-    features: validateFeatureConfig(options.features ?? environmentFeatures),
+    features: resolvedFeatures,
     publicReadRateLimitMax: positiveInteger(
       options.publicReadRateLimitMax ?? PUBLIC_READ_RATE_LIMIT_MAX,
       'publicReadRateLimitMax',
@@ -159,13 +187,16 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       'publicReadTimeoutMs',
     ),
     readinessProbe: options.readinessProbe ?? defaultReadinessProbe,
-    observerAuth: options.observerAuth,
+    observerAuth: options.observerAuth ?? environmentObserverAuth,
     storageEndpointResolver: options.storageEndpointResolver,
     silent: options.silent ?? false,
     // Production is bound to exactly one trusted reverse-proxy hop. Never
     // trust an arbitrary X-Forwarded-For chain.
     trustProxy: resolveTrustProxy(options.trustProxy),
   });
+  if (isProduction && resolvedOptions.features.accounts && resolvedOptions.observerAuth === undefined) {
+    throw new Error('Production observer accounts require configured authentication dependencies');
+  }
   const requiresObjectStorage = resolvedOptions.features.accounts
     || resolvedOptions.features.identification
     || resolvedOptions.features.submissions;

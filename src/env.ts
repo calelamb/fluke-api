@@ -6,6 +6,7 @@ const DEVELOPMENT_WEB_ORIGINS = 'http://localhost:5174,http://localhost:5173';
 const DEVELOPMENT_API_ORIGIN = 'http://localhost:4000';
 const FIXED_OBSERVER_COOKIE_NAMES = new Set(['fluke_observer', 'fluke_csrf']);
 const RFC_COOKIE_TOKEN_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u;
+const STANDARD_BASE64_PATTERN = /^[A-Za-z0-9+/]+={1,2}$/u;
 
 const adminCookieName = z
   .string()
@@ -25,6 +26,14 @@ const featureFlag = z
   .enum(['true', 'false'])
   .default('false')
   .transform((value) => value === 'true');
+
+const tokenEncryptionKey = z.string().refine((value) => {
+  if (!STANDARD_BASE64_PATTERN.test(value) || value.length % 4 !== 0) {
+    return false;
+  }
+  const decoded = Buffer.from(value, 'base64');
+  return decoded.length === 32 && decoded.toString('base64') === value;
+}, 'must be a standard padded base64 encoding of exactly 32 bytes');
 
 const originList = z
   .string()
@@ -49,6 +58,15 @@ const envSchema = z
     ENABLE_SUBMISSIONS: featureFlag,
     ENABLE_ACCOUNTS: featureFlag,
     ENABLE_IDENTIFY: featureFlag,
+    PRODUCTION_MUTATIONS_ACK: featureFlag,
+
+    APPLE_CLIENT_ID: z.literal('app.fluke.Fluke').optional(),
+    APPLE_TEAM_ID: z.literal('86RBV2JZ8F').optional(),
+    APPLE_KEY_ID: z.string().regex(/^[A-Z0-9]{10}$/u).optional(),
+    APPLE_PRIVATE_KEY: z.string().includes('BEGIN PRIVATE KEY').optional(),
+    APPLE_TOKEN_ENCRYPTION_KEY: tokenEncryptionKey.optional(),
+    OBSERVER_JWT_SECRET: z.string().min(43).optional(),
+    OBSERVER_CSRF_SECRET: z.string().min(43).optional(),
 
     // Local storage is restricted to development/test. Production mutation
     // processes must select the private S3-compatible adapter.
@@ -69,17 +87,48 @@ const envSchema = z
     OBJECT_STORAGE_SECRET_ACCESS_KEY: z.string().min(1).max(1_024).optional(),
     OBJECT_STORAGE_FORCE_PATH_STYLE: z
       .enum(['true', 'false'])
-      .transform((value) => value === 'true')
-      .optional(),
+      .default('false')
+      .transform((value) => value === 'true'),
   })
   .superRefine((value, ctx) => {
+    const appleKeys = [
+      'APPLE_CLIENT_ID',
+      'APPLE_TEAM_ID',
+      'APPLE_KEY_ID',
+      'APPLE_PRIVATE_KEY',
+      'APPLE_TOKEN_ENCRYPTION_KEY',
+    ] as const;
+    const configuredAppleValues = appleKeys.filter((key) => value[key] !== undefined);
+    if (configuredAppleValues.length > 0 && configuredAppleValues.length < appleKeys.length) {
+      for (const key of appleKeys) {
+        if (value[key] === undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [key],
+            message: 'APPLE_* values must be configured all-or-none',
+          });
+        }
+      }
+    }
+    const observerKeys = ['OBSERVER_JWT_SECRET', 'OBSERVER_CSRF_SECRET'] as const;
+    const configuredObserverValues = observerKeys.filter((key) => value[key] !== undefined);
+    if (configuredObserverValues.length > 0 && configuredObserverValues.length < observerKeys.length) {
+      for (const key of observerKeys) {
+        if (value[key] === undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [key],
+            message: 'OBSERVER_* values must be configured all-or-none',
+          });
+        }
+      }
+    }
     const storageKeys = [
       'OBJECT_STORAGE_BUCKET',
       'OBJECT_STORAGE_REGION',
       'OBJECT_STORAGE_ENDPOINT',
       'OBJECT_STORAGE_ACCESS_KEY_ID',
       'OBJECT_STORAGE_SECRET_ACCESS_KEY',
-      'OBJECT_STORAGE_FORCE_PATH_STYLE',
     ] as const;
     const configuredStorageValues = storageKeys.filter((key) => value[key] !== undefined);
     if (configuredStorageValues.length > 0 && configuredStorageValues.length < storageKeys.length) {
@@ -190,14 +239,45 @@ function productionIssues(input: NodeJS.ProcessEnv, parsed: Env): readonly strin
     }
   }
 
-  const releaseBFlags = [
-    ['ENABLE_ACCOUNTS', parsed.ENABLE_ACCOUNTS],
-    ['ENABLE_IDENTIFY', parsed.ENABLE_IDENTIFY],
-    ['ENABLE_SUBMISSIONS', parsed.ENABLE_SUBMISSIONS],
-  ] as const;
-  for (const [name, enabled] of releaseBFlags) {
-    if (enabled) {
-      issues.push(`${name}: must remain false in production Release A`);
+  if (parsed.ENABLE_IDENTIFY) {
+    issues.push('ENABLE_IDENTIFY: must remain false in production');
+  }
+  if (parsed.ENABLE_ACCOUNTS !== parsed.ENABLE_SUBMISSIONS) {
+    issues.push(
+      'ENABLE_ACCOUNTS/ENABLE_SUBMISSIONS: production mutations must be enabled together',
+    );
+  }
+  if (parsed.PRODUCTION_MUTATIONS_ACK && !parsed.ENABLE_ACCOUNTS && !parsed.ENABLE_SUBMISSIONS) {
+    issues.push(
+      'PRODUCTION_MUTATIONS_ACK: must remain false while production mutations are disabled',
+    );
+  }
+
+  if (parsed.ENABLE_ACCOUNTS && parsed.ENABLE_SUBMISSIONS) {
+    if (!parsed.PRODUCTION_MUTATIONS_ACK) {
+      issues.push('PRODUCTION_MUTATIONS_ACK: must be true for production mutations');
+    }
+    if (parsed.STORAGE_BACKEND !== 's3') {
+      issues.push('STORAGE_BACKEND: production mutations require private S3-compatible storage');
+    }
+    const requiredDependencies = [
+      'APPLE_CLIENT_ID',
+      'APPLE_TEAM_ID',
+      'APPLE_KEY_ID',
+      'APPLE_PRIVATE_KEY',
+      'APPLE_TOKEN_ENCRYPTION_KEY',
+      'OBSERVER_JWT_SECRET',
+      'OBSERVER_CSRF_SECRET',
+      'OBJECT_STORAGE_BUCKET',
+      'OBJECT_STORAGE_REGION',
+      'OBJECT_STORAGE_ENDPOINT',
+      'OBJECT_STORAGE_ACCESS_KEY_ID',
+      'OBJECT_STORAGE_SECRET_ACCESS_KEY',
+    ] as const;
+    for (const key of requiredDependencies) {
+      if (parsed[key] === undefined) {
+        issues.push(`${key}: is required for production mutations`);
+      }
     }
   }
 
