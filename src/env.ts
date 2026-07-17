@@ -36,7 +36,30 @@ const tokenEncryptionKey = z.string().refine((value) => {
   return decoded.length === 32 && decoded.toString('base64') === value;
 }, 'must be a standard padded base64 encoding of exactly 32 bytes');
 
+function hasExactPkcs8PemBoundary(value: string): boolean {
+  if (/\r(?!\n)/u.test(value)) {
+    return false;
+  }
+  const splitLines = value.split(/\r?\n/u);
+  const lines = splitLines.at(-1) === '' ? splitLines.slice(0, -1) : splitLines;
+  if (
+    lines[0] !== '-----BEGIN PRIVATE KEY-----'
+    || lines.at(-1) !== '-----END PRIVATE KEY-----'
+  ) {
+    return false;
+  }
+  const bodyLines = lines.slice(1, -1);
+  if (bodyLines.length === 0 || bodyLines.some((line) => !/^[A-Za-z0-9+/]+={0,2}$/u.test(line))) {
+    return false;
+  }
+  const body = bodyLines.join('');
+  return Buffer.from(body, 'base64').toString('base64') === body;
+}
+
 const applePrivateKey = z.string().max(16_384).refine((value) => {
+  if (!hasExactPkcs8PemBoundary(value)) {
+    return false;
+  }
   try {
     const key = createPrivateKey({ format: 'pem', key: value, type: 'pkcs8' });
     return key.asymmetricKeyType === 'ec'

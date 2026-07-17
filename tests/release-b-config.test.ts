@@ -21,6 +21,27 @@ function generateEcPrivateKey(namedCurve: string): string {
   }).privateKey;
 }
 
+function generateSec1PrivateKey(): string {
+  return generateKeyPairSync('ec', {
+    namedCurve: 'prime256v1',
+    privateKeyEncoding: { format: 'pem', type: 'sec1' },
+    publicKeyEncoding: { format: 'pem', type: 'spki' },
+  }).privateKey;
+}
+
+function generateEncryptedPrivateKey(): string {
+  return generateKeyPairSync('ec', {
+    namedCurve: 'prime256v1',
+    privateKeyEncoding: {
+      cipher: 'aes-256-cbc',
+      format: 'pem',
+      passphrase: 'test-only-passphrase',
+      type: 'pkcs8',
+    },
+    publicKeyEncoding: { format: 'pem', type: 'spki' },
+  }).privateKey;
+}
+
 const VALID_APPLE_PRIVATE_KEY = generateEcPrivateKey('prime256v1');
 
 const SAFE_RELEASE_B_ENV: NodeJS.ProcessEnv = {
@@ -115,6 +136,9 @@ describe('Release B production capability configuration', () => {
       }).privateKey,
     ],
     ['an EC key on the wrong curve', generateEcPrivateKey('secp384r1')],
+    ['a P-256 SEC1 key', generateSec1PrivateKey()],
+    ['an encrypted P-256 PKCS#8 key', generateEncryptedPrivateKey()],
+    ['a PKCS#8 key with trailing content', `${VALID_APPLE_PRIVATE_KEY}trailing-content`],
   ])('rejects %s for Apple ES256 client secrets', (_name, privateKey) => {
     expect(() => parseEnv({
       ...SAFE_RELEASE_B_ENV,
