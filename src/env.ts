@@ -1,4 +1,5 @@
 import ipaddr from 'ipaddr.js';
+import { createPrivateKey } from 'node:crypto';
 import { z } from 'zod';
 import { objectStorageEndpointIssue } from './lib/storage-endpoint.js';
 
@@ -35,6 +36,16 @@ const tokenEncryptionKey = z.string().refine((value) => {
   return decoded.length === 32 && decoded.toString('base64') === value;
 }, 'must be a standard padded base64 encoding of exactly 32 bytes');
 
+const applePrivateKey = z.string().max(16_384).refine((value) => {
+  try {
+    const key = createPrivateKey({ format: 'pem', key: value, type: 'pkcs8' });
+    return key.asymmetricKeyType === 'ec'
+      && key.asymmetricKeyDetails?.namedCurve === 'prime256v1';
+  } catch {
+    return false;
+  }
+}, 'must be an unencrypted PKCS#8 EC P-256 private key for ES256');
+
 const originList = z
   .string()
   .min(1)
@@ -63,7 +74,7 @@ const envSchema = z
     APPLE_CLIENT_ID: z.literal('app.fluke.Fluke').optional(),
     APPLE_TEAM_ID: z.literal('86RBV2JZ8F').optional(),
     APPLE_KEY_ID: z.string().regex(/^[A-Z0-9]{10}$/u).optional(),
-    APPLE_PRIVATE_KEY: z.string().includes('BEGIN PRIVATE KEY').optional(),
+    APPLE_PRIVATE_KEY: applePrivateKey.optional(),
     APPLE_TOKEN_ENCRYPTION_KEY: tokenEncryptionKey.optional(),
     OBSERVER_JWT_SECRET: z.string().min(43).optional(),
     OBSERVER_CSRF_SECRET: z.string().min(43).optional(),

@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { generateKeyPairSync } from 'node:crypto';
 import { parse as parseDotEnv } from 'dotenv';
 import { describe, expect, it } from 'vitest';
 import { parseEnv } from '../src/env.js';
@@ -11,6 +12,16 @@ const REQUIRED_ENV: NodeJS.ProcessEnv = {
   JWT_SECRET: 'x'.repeat(32),
 };
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
+
+function generateEcPrivateKey(namedCurve: string): string {
+  return generateKeyPairSync('ec', {
+    namedCurve,
+    privateKeyEncoding: { format: 'pem', type: 'pkcs8' },
+    publicKeyEncoding: { format: 'pem', type: 'spki' },
+  }).privateKey;
+}
+
+const VALID_APPLE_PRIVATE_KEY = generateEcPrivateKey('prime256v1');
 
 const SAFE_RELEASE_B_ENV: NodeJS.ProcessEnv = {
   ...REQUIRED_ENV,
@@ -31,7 +42,7 @@ const SAFE_RELEASE_B_ENV: NodeJS.ProcessEnv = {
   APPLE_CLIENT_ID: 'app.fluke.Fluke',
   APPLE_TEAM_ID: '86RBV2JZ8F',
   APPLE_KEY_ID: 'ABC123DEFG',
-  APPLE_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----\nnot-a-real-key\n-----END PRIVATE KEY-----',
+  APPLE_PRIVATE_KEY: VALID_APPLE_PRIVATE_KEY,
   APPLE_TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
   OBSERVER_JWT_SECRET: 'j'.repeat(43),
   OBSERVER_CSRF_SECRET: 'c'.repeat(43),
@@ -88,6 +99,27 @@ describe('Release B production capability configuration', () => {
     ['short observer CSRF secret', { OBSERVER_CSRF_SECRET: 'short' }],
   ])('rejects %s', (_name, override) => {
     expect(() => parseEnv({ ...SAFE_RELEASE_B_ENV, ...override })).toThrow();
+  });
+
+  it.each([
+    [
+      'malformed PKCS#8 content',
+      '-----BEGIN PRIVATE KEY-----\nnot-a-real-key\n-----END PRIVATE KEY-----',
+    ],
+    [
+      'an RSA PKCS#8 key',
+      generateKeyPairSync('rsa', {
+        modulusLength: 2048,
+        privateKeyEncoding: { format: 'pem', type: 'pkcs8' },
+        publicKeyEncoding: { format: 'pem', type: 'spki' },
+      }).privateKey,
+    ],
+    ['an EC key on the wrong curve', generateEcPrivateKey('secp384r1')],
+  ])('rejects %s for Apple ES256 client secrets', (_name, privateKey) => {
+    expect(() => parseEnv({
+      ...SAFE_RELEASE_B_ENV,
+      APPLE_PRIVATE_KEY: privateKey,
+    })).toThrow(/APPLE_PRIVATE_KEY/);
   });
 
   it('rejects a partial dormant observer dependency block', () => {
