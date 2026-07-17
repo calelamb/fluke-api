@@ -42,6 +42,7 @@ enum IdConfidence {
 enum UserRole {
   ADMIN
   MODERATOR
+  OBSERVER
 }
 
 enum PhotoQuality {
@@ -74,89 +75,93 @@ enum JobRunEventType {
 }
 
 model Whale {
-  id                    String          @id @default(uuid())
-  catalogId             String          @unique @map("catalog_id")
-  name                  String?
-  ecotype               Ecotype
-  pod                   String?
-  sex                   Sex             @default(UNKNOWN)
-  birthYear             Int?            @map("birth_year")
-  deathYear             Int?            @map("death_year")
-  status                WhaleStatus     @default(UNKNOWN)
-  motherId              String?         @map("mother_id")
-  mother                Whale?          @relation("Lineage", fields: [motherId], references: [id], onDelete: SetNull)
-  offspring             Whale[]         @relation("Lineage")
-  biography             String?
-  distinguishingMarks   String?         @map("distinguishing_marks")
-  heroImageUrl          String?         @map("hero_image_url")
-  notableEvents         Json?           @map("notable_events")
-  sourceCitations       Json?           @map("source_citations")
-  sightings             SightingWhale[]
-  annotations           PhotoAnnotation[]
-  referencePhotos       WhaleReferencePhoto[]
-  createdAt             DateTime        @default(now()) @map("created_at")
-  updatedAt             DateTime        @updatedAt @map("updated_at")
+  id                  String                @id @default(uuid())
+  catalogId           String                @unique @map("catalog_id")
+  name                String?
+  ecotype             Ecotype
+  pod                 String?
+  sex                 Sex                   @default(UNKNOWN)
+  birthYear           Int?                  @map("birth_year")
+  deathYear           Int?                  @map("death_year")
+  status              WhaleStatus           @default(UNKNOWN)
+  motherId            String?               @map("mother_id")
+  mother              Whale?                @relation("Lineage", fields: [motherId], references: [id], onDelete: SetNull)
+  offspring           Whale[]               @relation("Lineage")
+  biography           String?
+  distinguishingMarks String?               @map("distinguishing_marks")
+  heroImageUrl        String?               @map("hero_image_url")
+  notableEvents       Json?                 @map("notable_events")
+  sourceCitations     Json?                 @map("source_citations")
+  sightings           SightingWhale[]
+  annotations         PhotoAnnotation[]
+  referencePhotos     WhaleReferencePhoto[]
+  createdAt           DateTime              @default(now()) @map("created_at")
+  updatedAt           DateTime              @updatedAt @map("updated_at")
 
   @@index([ecotype, pod])
   @@map("whales")
 }
 
 model Sighting {
-  id              String          @id @default(uuid())
-  observedAt      DateTime        @map("observed_at")
-  latitude        Decimal         @db.Decimal(9, 6)
-  longitude       Decimal         @db.Decimal(9, 6)
-  locationName    String?         @map("location_name")
-  ecotypeGuess    Ecotype?        @map("ecotype_guess")
-  groupSize       Int?            @map("group_size")
-  behaviorNotes   String?         @map("behavior_notes")
-  observerName    String?         @map("observer_name")
-  observerEmail   String          @map("observer_email")
-  status          SightingStatus  @default(PENDING)
-  rejectionReason String?         @map("rejection_reason")
+  id              String                  @id @default(uuid())
+  observedAt      DateTime                @map("observed_at")
+  latitude        Decimal                 @db.Decimal(9, 6)
+  longitude       Decimal                 @db.Decimal(9, 6)
+  locationName    String?                 @map("location_name")
+  ecotypeGuess    Ecotype?                @map("ecotype_guess")
+  groupSize       Int?                    @map("group_size")
+  behaviorNotes   String?                 @map("behavior_notes")
+  observerName    String?                 @map("observer_name")
+  observerEmail   String                  @map("observer_email")
+  status          SightingStatus          @default(PENDING)
+  rejectionReason String?                 @map("rejection_reason")
   photos          SightingPhoto[]
   whales          SightingWhale[]
-  moderatedById   String?         @map("moderated_by")
-  moderatedBy     User?           @relation(fields: [moderatedById], references: [id], onDelete: SetNull)
-  moderatedAt     DateTime?       @map("moderated_at")
-  createdAt       DateTime        @default(now()) @map("created_at")
+  observerUserId  String?                 @map("observer_user_id")
+  observerUser    User?                   @relation("Observer", fields: [observerUserId], references: [id], onDelete: SetNull)
+  moderatedById   String?                 @map("moderated_by")
+  moderatedBy     User?                   @relation("Moderator", fields: [moderatedById], references: [id], onDelete: SetNull)
+  idempotencies   SubmissionIdempotency[]
+  moderatedAt     DateTime?               @map("moderated_at")
+  createdAt       DateTime                @default(now()) @map("created_at")
 
   @@index([status, observedAt(sort: Desc)])
+  @@index([observerUserId, observedAt(sort: Desc), id(sort: Desc)])
   @@index([latitude, longitude])
   @@map("sightings")
 }
 
 model SightingPhoto {
-  id            String            @id @default(uuid())
-  sightingId    String            @map("sighting_id")
-  sighting      Sighting          @relation(fields: [sightingId], references: [id], onDelete: Cascade)
-  storageKey    String            @map("storage_key")
-  url           String
-  thumbnailUrl  String            @map("thumbnail_url")
-  orderIndex    Int               @default(0) @map("order_index")
-  done          Boolean           @default(false)
-  annotations   PhotoAnnotation[]
-  createdAt     DateTime          @default(now()) @map("created_at")
+  id           String            @id @default(uuid())
+  sightingId   String            @map("sighting_id")
+  sighting     Sighting          @relation(fields: [sightingId], references: [id], onDelete: Cascade)
+  storageKey   String            @map("storage_key")
+  url          String
+  thumbnailUrl String            @map("thumbnail_url")
+  orderIndex   Int               @default(0) @map("order_index")
+  done         Boolean           @default(false)
+  annotations  PhotoAnnotation[]
+  createdAt    DateTime          @default(now()) @map("created_at")
 
   @@index([done])
   @@map("sighting_photos")
 }
 
 model WhaleReferencePhoto {
-  id              String              @id @default(uuid())
-  whaleId         String              @map("whale_id")
-  whale           Whale               @relation(fields: [whaleId], references: [id], onDelete: Cascade)
-  storageKey      String              @map("storage_key")
+  id              String             @id @default(uuid())
+  whaleId         String             @map("whale_id")
+  whale           Whale              @relation(fields: [whaleId], references: [id], onDelete: Cascade)
+  storageKey      String             @map("storage_key")
   url             String
-  side            ReferencePhotoSide  @default(UNKNOWN)
-  quality         PhotoQuality        @default(USABLE)
-  cropX           Float?              @map("crop_x")
-  cropY           Float?              @map("crop_y")
-  cropWidth       Float?              @map("crop_width")
-  cropHeight      Float?              @map("crop_height")
-  embeddingStatus EmbeddingStatus     @default(PENDING) @map("embedding_status")
+  side            ReferencePhotoSide @default(UNKNOWN)
+  quality         PhotoQuality       @default(USABLE)
+  cropX           Float?             @map("crop_x")
+  cropY           Float?             @map("crop_y")
+  cropWidth       Float?             @map("crop_width")
+  cropHeight      Float?             @map("crop_height")
+  embeddingStatus EmbeddingStatus    @default(PENDING) @map("embedding_status")
   notes           String?
-  createdAt       DateTime            @default(now()) @map("created_at")
+  createdAt       DateTime           @default(now()) @map("created_at")
 
   @@index([whaleId])
   @@index([embeddingStatus])
@@ -164,20 +169,20 @@ model WhaleReferencePhoto {
 }
 
 model PhotoAnnotation {
-  id            String         @id @default(uuid())
-  photoId       String         @map("photo_id")
-  photo         SightingPhoto  @relation(fields: [photoId], references: [id], onDelete: Cascade)
-  version       Int            @default(1)
-  quality       PhotoQuality
-  payload       Json
-  whaleId       String?        @map("whale_id")
-  whale         Whale?         @relation(fields: [whaleId], references: [id], onDelete: SetNull)
-  confidence    IdConfidence?
-  notes         String?
-  done          Boolean        @default(false)
-  labeledById   String         @map("labeled_by")
-  labeledBy     User           @relation(fields: [labeledById], references: [id], onDelete: Restrict)
-  labeledAt     DateTime       @default(now()) @map("labeled_at")
+  id          String        @id @default(uuid())
+  photoId     String        @map("photo_id")
+  photo       SightingPhoto @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  version     Int           @default(1)
+  quality     PhotoQuality
+  payload     Json
+  whaleId     String?       @map("whale_id")
+  whale       Whale?        @relation(fields: [whaleId], references: [id], onDelete: SetNull)
+  confidence  IdConfidence?
+  notes       String?
+  done        Boolean       @default(false)
+  labeledById String        @map("labeled_by")
+  labeledBy   User          @relation(fields: [labeledById], references: [id], onDelete: Restrict)
+  labeledAt   DateTime      @default(now()) @map("labeled_at")
 
   @@unique([photoId, version])
   @@index([photoId, version(sort: Desc)])
@@ -187,12 +192,12 @@ model PhotoAnnotation {
 }
 
 model SightingWhale {
-  sightingId  String       @map("sighting_id")
-  whaleId     String       @map("whale_id")
-  sighting    Sighting     @relation(fields: [sightingId], references: [id], onDelete: Cascade)
-  whale       Whale        @relation(fields: [whaleId], references: [id], onDelete: Cascade)
-  confidence  IdConfidence
-  mlScore     Float?       @map("ml_score")
+  sightingId String       @map("sighting_id")
+  whaleId    String       @map("whale_id")
+  sighting   Sighting     @relation(fields: [sightingId], references: [id], onDelete: Cascade)
+  whale      Whale        @relation(fields: [whaleId], references: [id], onDelete: Cascade)
+  confidence IdConfidence
+  mlScore    Float?       @map("ml_score")
 
   @@id([sightingId, whaleId])
   @@index([whaleId])
@@ -200,38 +205,58 @@ model SightingWhale {
 }
 
 model User {
-  id              String            @id @default(uuid())
-  email           String            @unique
-  passwordHash    String            @map("password_hash")
-  role            UserRole          @default(MODERATOR)
-  sightings       Sighting[]
-  auditLogs       AuditLog[]
-  photoAnnotations PhotoAnnotation[]
-  createdAt       DateTime          @default(now()) @map("created_at")
+  id                          String                  @id @default(uuid())
+  email                       String?                 @unique
+  passwordHash                String?                 @map("password_hash")
+  appleSub                    String?                 @unique @map("apple_sub")
+  displayName                 String?                 @map("display_name")
+  appleRefreshTokenCiphertext String?                 @map("apple_refresh_token_ciphertext")
+  sessionVersion              Int                     @default(1) @map("session_version")
+  role                        UserRole                @default(MODERATOR)
+  moderatedSightings          Sighting[]              @relation("Moderator")
+  observedSightings           Sighting[]              @relation("Observer")
+  submissionIdempotencies     SubmissionIdempotency[]
+  auditLogs                   AuditLog[]
+  photoAnnotations            PhotoAnnotation[]
+  createdAt                   DateTime                @default(now()) @map("created_at")
 
   @@map("users")
 }
 
+model SubmissionIdempotency {
+  id          String   @id @default(uuid())
+  keyHash     String   @unique @map("key_hash")
+  requestHash String   @map("request_hash")
+  userId      String?  @map("user_id")
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sightingId  String   @map("sighting_id")
+  sighting    Sighting @relation(fields: [sightingId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("submission_idempotencies")
+}
+
 model AuditLog {
-  id          String    @id @default(uuid())
-  userId      String    @map("user_id")
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  action      String
-  entityType  String    @map("entity_type")
-  entityId    String    @map("entity_id")
-  metadata    Json?
-  createdAt   DateTime  @default(now()) @map("created_at")
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at")
 
   @@index([userId, createdAt(sort: Desc)])
   @@map("audit_log")
 }
 
 model IdentificationAttempt {
-  id            String   @id @default(uuid())
-  uploadKey     String   @map("upload_key")
-  uploadUrl     String   @map("upload_url")
-  resultJson    Json     @map("result_json")
-  createdAt     DateTime @default(now()) @map("created_at")
+  id         String   @id @default(uuid())
+  uploadKey  String   @map("upload_key")
+  uploadUrl  String   @map("upload_url")
+  resultJson Json     @map("result_json")
+  createdAt  DateTime @default(now()) @map("created_at")
 
   @@index([createdAt(sort: Desc)])
   @@map("identification_attempts")
@@ -241,20 +266,20 @@ model IdentificationAttempt {
 // to keep provenance separate from user-submitted Sightings. They bypass the
 // moderation queue because the source organisations have already vetted them.
 model ExternalSighting {
-  id            String   @id @default(uuid())
-  source        String   // 'acartia', 'orcasound', etc.
-  externalId    String   @map("external_id")
-  observedAt    DateTime @map("observed_at")
-  latitude      Decimal  @db.Decimal(9, 6)
-  longitude     Decimal  @db.Decimal(9, 6)
-  species       String   // raw type field from source (e.g. 'Killer Whale')
-  ecotypeGuess  Ecotype? @map("ecotype_guess")
-  groupSize     Int?     @map("group_size")
-  attribution   String   // org name for display, e.g. 'Conserve.io / Spotter-API'
-  sourceUrl     String?  @map("source_url")
-  notes         String?
-  trusted       Boolean  @default(false)
-  fetchedAt     DateTime @default(now()) @map("fetched_at")
+  id           String   @id @default(uuid())
+  source       String // 'acartia', 'orcasound', etc.
+  externalId   String   @map("external_id")
+  observedAt   DateTime @map("observed_at")
+  latitude     Decimal  @db.Decimal(9, 6)
+  longitude    Decimal  @db.Decimal(9, 6)
+  species      String // raw type field from source (e.g. 'Killer Whale')
+  ecotypeGuess Ecotype? @map("ecotype_guess")
+  groupSize    Int?     @map("group_size")
+  attribution  String // org name for display, e.g. 'Conserve.io / Spotter-API'
+  sourceUrl    String?  @map("source_url")
+  notes        String?
+  trusted      Boolean  @default(false)
+  fetchedAt    DateTime @default(now()) @map("fetched_at")
 
   @@unique([source, externalId])
   @@index([observedAt(sort: Desc)])
@@ -263,14 +288,14 @@ model ExternalSighting {
 }
 
 model PredictionGrid {
-  id            String   @id @default(uuid())
-  subjectKind   String   @map("subject_kind")
-  subjectId     String   @map("subject_id")
-  horizonHours  Int      @map("horizon_hours")
-  cells         Json
-  confidence    Decimal  @db.Decimal(4, 3)
-  modelVersion  String   @map("model_version")
-  computedAt    DateTime @map("computed_at")
+  id           String   @id @default(uuid())
+  subjectKind  String   @map("subject_kind")
+  subjectId    String   @map("subject_id")
+  horizonHours Int      @map("horizon_hours")
+  cells        Json
+  confidence   Decimal  @db.Decimal(4, 3)
+  modelVersion String   @map("model_version")
+  computedAt   DateTime @map("computed_at")
 
   @@unique([subjectKind, subjectId, horizonHours])
   @@map("prediction_grids")

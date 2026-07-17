@@ -131,7 +131,7 @@ describe('release configuration', () => {
     );
 
     expect(readiness).toContain(
-      "export const REQUIRED_MIGRATION = '20260716220000_add_job_operations'",
+      "export const REQUIRED_MIGRATION = '20260717170000_add_observer_submissions'",
     );
     expect(migration).toContain('CREATE TABLE "job_leases"');
     expect(migration).toContain('CREATE TABLE "job_run_events"');

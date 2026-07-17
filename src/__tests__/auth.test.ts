@@ -24,10 +24,14 @@ const { prisma } = await import('../db.js');
 const { buildApp } = await import('../app.js');
 
 const TEST_USER = {
+  appleRefreshTokenCiphertext: null,
+  appleSub: null,
   id: 'admin-uuid',
+  displayName: null,
   email: 'admin@example.com',
   passwordHash: '', // populated in beforeAll
   role: 'ADMIN' as const,
+  sessionVersion: 1,
   createdAt: new Date(),
 };
 
@@ -96,6 +100,24 @@ describe('auth routes', () => {
         method: 'POST',
         url: '/api/v1/auth/login',
         payload: { email: TEST_USER.email, password: 'wrong-password' },
+      });
+
+      expect(response.statusCode).toBe(401);
+    });
+
+    it('returns 401 for a passwordless observer identity', async () => {
+      vi.mocked(prisma.user.findUnique).mockResolvedValue({
+        ...TEST_USER,
+        appleSub: 'apple-observer-sub',
+        email: null,
+        passwordHash: null,
+        role: 'OBSERVER',
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: { email: 'observer@example.com', password: 'not-an-admin-password' },
       });
 
       expect(response.statusCode).toBe(401);

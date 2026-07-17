@@ -20,7 +20,7 @@ export default async function authRoutes(app: FastifyInstance) {
     const { email, password } = parsed.data;
     const user = await prisma.user.findUnique({ where: { email } });
 
-    if (!user) {
+    if (!user?.passwordHash || !user.email) {
       await bcrypt.compare(password, '$2a$12$invalidplaceholderhashvalueplaceholder');
       return reply.code(401).send({ error: 'Invalid credentials' });
     }
