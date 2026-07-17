@@ -147,7 +147,7 @@ describe('POST /api/v1/sightings/:id/photos', () => {
       });
 
       expect(response.statusCode).toBe(403);
-      expect(response.json<{ error: string }>().error).toMatch(/invalid photo upload token/i);
+      expect(response.json<{ code: string }>().code).toBe('FORBIDDEN');
       // Should bail before touching the DB.
       expect(prisma.sighting.findUnique).not.toHaveBeenCalled();
       expect(prisma.sightingPhoto.create).not.toHaveBeenCalled();
@@ -175,7 +175,7 @@ describe('POST /api/v1/sightings/:id/photos', () => {
       });
 
       expect(response.statusCode).toBe(403);
-      expect(response.json<{ error: string }>().error).toMatch(/invalid photo upload token/i);
+      expect(response.json<{ code: string }>().code).toBe('FORBIDDEN');
       expect(prisma.sightingPhoto.create).not.toHaveBeenCalled();
 
       verifySpy.mockRestore();
@@ -201,7 +201,7 @@ describe('POST /api/v1/sightings/:id/photos', () => {
       });
 
       expect(response.statusCode).toBe(403);
-      expect(response.json<{ error: string }>().error).toMatch(/invalid photo upload token/i);
+      expect(response.json<{ code: string }>().code).toBe('FORBIDDEN');
       expect(prisma.sightingPhoto.create).not.toHaveBeenCalled();
     });
   });
@@ -250,7 +250,7 @@ describe('POST /api/v1/sightings/:id/photos', () => {
       });
 
       expect(response.statusCode).toBe(403);
-      expect(response.json<{ error: string }>().error).toMatch(/no longer accepting/i);
+      expect(response.json<{ code: string }>().code).toBe('FORBIDDEN');
       expect(prisma.sightingPhoto.create).not.toHaveBeenCalled();
     });
 
@@ -273,7 +273,7 @@ describe('POST /api/v1/sightings/:id/photos', () => {
       });
 
       expect(response.statusCode).toBe(403);
-      expect(response.json<{ error: string }>().error).toMatch(/window has closed/i);
+      expect(response.json<{ code: string }>().code).toBe('FORBIDDEN');
     });
   });
 
@@ -370,7 +370,7 @@ describe('POST /api/v1/sightings/:id/photos', () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json<{ error: string }>().error).toMatch(/max 5/);
+    expect(response.json<{ code: string }>().code).toBe('VALIDATION_ERROR');
   });
 
   it('writes 1024w + 256w variants to disk and persists a SightingPhoto row', async () => {

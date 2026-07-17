@@ -79,6 +79,6 @@ describe('admin reference-photo routes', () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json<{ error: string }>().error).toMatch(/no reference photos/i);
+    expect(response.json<{ code: string }>().code).toBe('VALIDATION_ERROR');
   });
 });

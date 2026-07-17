@@ -71,6 +71,7 @@ describe('POST /api/v1/identify', () => {
     });
 
     expect(response.statusCode).toBe(406);
+    expect(response.json<{ code: string }>().code).toBe('VALIDATION_ERROR');
     expect(prisma.identificationAttempt.create).not.toHaveBeenCalled();
   });
 

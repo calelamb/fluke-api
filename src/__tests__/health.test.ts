@@ -65,7 +65,12 @@ describe('GET /api/v1/ready', () => {
       const response = await app.inject({ method: 'GET', url: '/api/v1/ready' });
 
       expect(response.statusCode).toBe(503);
-      expect(response.json()).toEqual({ status: 'unready' });
+      expect(response.json()).toEqual({
+        code: 'UPSTREAM_UNAVAILABLE',
+        message: 'A required service is temporarily unavailable.',
+        requestId: expect.any(String),
+        retryable: true,
+      });
       expect(response.body).not.toContain('database-user');
       expect(response.body).not.toContain('secret');
     } finally {

@@ -86,7 +86,7 @@ describe('auth routes', () => {
       });
 
       expect(response.statusCode).toBe(401);
-      expect(response.json<{ error: string }>().error).toMatch(/Invalid credentials/i);
+      expect(response.json<{ code: string }>().code).toBe('UNAUTHORIZED');
     });
 
     it('returns 401 when the password does not match', async () => {

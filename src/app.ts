@@ -1,5 +1,7 @@
+import compress from '@fastify/compress';
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
+import helmet from '@fastify/helmet';
 import jwt from '@fastify/jwt';
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
@@ -7,6 +9,7 @@ import sensible from '@fastify/sensible';
 import staticPlugin from '@fastify/static';
 import { mkdir } from 'node:fs/promises';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { SafeErrorSchema } from './contracts/index.js';
 import { prisma } from './db.js';
 import { env, isProduction } from './env.js';
 import {
@@ -15,6 +18,8 @@ import {
   type FeatureConfig,
 } from './features.js';
 import { resolveUploadsDir } from './lib/storage.js';
+import { resolveRequestId } from './lib/request-id.js';
+import { classifyError, classifyStatus } from './lib/safe-errors.js';
 import adminRoutes from './routes/admin.js';
 import authRoutes from './routes/auth.js';
 import capabilitiesRoutes from './routes/capabilities.js';
@@ -29,11 +34,21 @@ import whalesRoutes from './routes/whales.js';
 
 export interface BuildAppOptions {
   readonly features?: FeatureConfig;
+  readonly publicReadRateLimitMax?: number;
   readonly readinessProbe?: ReadinessProbe;
   readonly silent?: boolean;
+  readonly trustProxy?: false | number;
 }
 
 const READINESS_TIMEOUT_MS = 5_000;
+const PUBLIC_READ_RATE_LIMIT_MAX = 120;
+
+function positiveInteger(value: number, name: string): number {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return value;
+}
 
 async function defaultReadinessProbe(): Promise<void> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -54,10 +69,17 @@ async function defaultReadinessProbe(): Promise<void> {
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
   const resolvedOptions = Object.freeze({
     features: validateFeatureConfig(options.features ?? environmentFeatures),
+    publicReadRateLimitMax: positiveInteger(
+      options.publicReadRateLimitMax ?? PUBLIC_READ_RATE_LIMIT_MAX,
+      'publicReadRateLimitMax',
+    ),
     readinessProbe: options.readinessProbe ?? defaultReadinessProbe,
     silent: options.silent ?? false,
+    trustProxy: options.trustProxy ?? (isProduction ? 1 : false),
   });
   const app = Fastify({
+    forceCloseConnections: 'idle',
+    genReqId: (request) => resolveRequestId(request.headers['x-request-id']),
     logger: resolvedOptions.silent
       ? false
       : isProduction
@@ -71,11 +93,67 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
               },
             },
           },
+    trustProxy: resolvedOptions.trustProxy,
+  });
+
+  app.addHook('onRequest', async (request, reply) => {
+    reply.header('x-request-id', request.id);
+  });
+  app.addHook('preSerialization', async (request, reply, payload) => {
+    if (reply.statusCode < 400) {
+      return payload;
+    }
+
+    const safePayload = SafeErrorSchema.safeParse(payload);
+    if (safePayload.success && safePayload.data.requestId === request.id) {
+      return safePayload.data;
+    }
+
+    const failure = classifyStatus(reply.statusCode, request.id);
+    const diagnostics = {
+      failureKind: failure.kind,
+      requestId: request.id,
+      statusCode: failure.statusCode,
+    };
+    if (failure.statusCode >= 500) {
+      request.log.error(diagnostics, 'request rejected');
+    } else {
+      request.log.warn(diagnostics, 'request rejected');
+    }
+    return failure.body;
+  });
+  app.setNotFoundHandler(async (request, reply) => {
+    const failure = classifyStatus(404, request.id);
+    return reply.code(failure.statusCode).send(failure.body);
+  });
+  app.setErrorHandler(async (error, request, reply) => {
+    const failure = classifyError(error, request.id);
+    const diagnostics = {
+      err: error,
+      failureKind: failure.kind,
+      requestId: request.id,
+      statusCode: failure.statusCode,
+    };
+    if (failure.statusCode >= 500) {
+      request.log.error(diagnostics, 'request failed');
+    } else {
+      request.log.warn(diagnostics, 'request failed');
+    }
+    return reply
+      .code(failure.statusCode)
+      .type('application/json')
+      .send(failure.body);
   });
 
   await app.register(cors, {
     origin: env.WEB_ORIGIN,
     credentials: true,
+  });
+  await app.register(helmet);
+  await app.register(compress, {
+    global: true,
+    globalDecompression: false,
+    threshold: 1_024,
   });
   await app.register(cookie);
   await app.register(jwt, {
@@ -85,7 +163,11 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       signed: false,
     },
   });
-  await app.register(rateLimit, { global: false });
+  await app.register(rateLimit, {
+    global: true,
+    max: resolvedOptions.publicReadRateLimitMax,
+    timeWindow: '1 minute',
+  });
   await app.register(sensible);
   const requiresMultipart = resolvedOptions.features.accounts
     || resolvedOptions.features.identification

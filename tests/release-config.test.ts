@@ -63,4 +63,15 @@ describe('release configuration', () => {
     expect(readme).toContain('UPLOADS_DIR=/app/uploads');
     expect(readme).toContain('gitleaks git --log-opts=--all --redact --no-banner .');
   });
+
+  it('installs bounded signal shutdown and disconnects Prisma', () => {
+    const entrypoint = readRepositoryFile('src/index.ts');
+
+    expect(entrypoint).toContain("process.once('SIGTERM'");
+    expect(entrypoint).toContain("process.once('SIGINT'");
+    expect(entrypoint).toContain('SHUTDOWN_TIMEOUT_MS');
+    expect(entrypoint).toContain('Promise.race([closeResources(), timeoutPromise])');
+    expect(entrypoint).toContain('prisma.$disconnect()');
+    expect(entrypoint).toContain('process.exit(1)');
+  });
 });
