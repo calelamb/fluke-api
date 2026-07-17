@@ -159,6 +159,7 @@ describe('sightings routes', () => {
 
   describe('POST /api/v1/sightings', () => {
     const validBody = {
+      clientSubmissionId: 'e0f59404-ded3-4a07-8b3e-247ec89adcf7',
       observedAt: new Date('2026-04-25T18:00:00Z').toISOString(),
       latitude: 48.5,
       longitude: -123.0,

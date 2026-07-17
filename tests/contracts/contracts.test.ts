@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AuthAppleRequestSchema,
+  AuthAppleResponseSchema,
   ExternalSightingsQuerySchema,
   HistoricalSightingsQuerySchema,
+  MySightingPageSchema,
   PageInfoSchema,
   PublicErrorCodeSchema,
   SafeErrorSchema,
@@ -29,20 +32,89 @@ describe('public API contracts', () => {
     expect(schema.safeParse({}).success).toBe(false);
   });
 
-  it('preserves submission validation behavior for unknown keys and whitespace', () => {
-    const result = SubmitSightingPayloadSchema.safeParse({
+  it('accepts the exact Apple exchange and response contracts', () => {
+    const nonce = 'n'.repeat(64);
+    const csrfToken = 'c'.repeat(64);
+
+    expect(AuthAppleRequestSchema.parse({
+      authorizationCode: 'single-use-code',
+      fullName: 'Casey Morgan',
+      identityToken: 'header.payload.signature',
+      nonce,
+    })).toMatchObject({ nonce });
+    expect(AuthAppleResponseSchema.parse({
+      csrfToken,
+      user: {
+        displayName: 'Casey Morgan',
+        email: 'relay@example.com',
+        id: 'user-1',
+        role: 'OBSERVER',
+      },
+    }).user.role).toBe('OBSERVER');
+
+    expect(AuthAppleRequestSchema.safeParse({
+      identityToken: 'header.payload.signature',
+      nonce,
+    }).success).toBe(false);
+    expect(AuthAppleRequestSchema.safeParse({
+      authorizationCode: 'single-use-code',
+      identityToken: 'header.payload.signature',
+    }).success).toBe(false);
+    expect(AuthAppleRequestSchema.safeParse({
+      authorizationCode: 'single-use-code',
+      identityToken: 'header.payload.signature',
+      nonce,
+      unexpected: true,
+    }).success).toBe(false);
+  });
+
+  it('requires a UUID idempotency key and rejects unknown submission fields', () => {
+    const basePayload = {
+      clientSubmissionId: 'e0f59404-ded3-4a07-8b3e-247ec89adcf7',
       observedAt: '2026-07-16T18:00:00.000Z',
       latitude: 48.5,
       longitude: -123.25,
-      locationName: '  Salish Sea  ',
       observerEmail: 'observer@example.com',
-      futureClientField: true,
-    });
+    } as const;
 
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.locationName).toBe('  Salish Sea  ');
-    }
+    expect(SubmitSightingPayloadSchema.safeParse({
+      ...basePayload,
+      clientSubmissionId: 'not-a-uuid',
+    }).success).toBe(false);
+    expect(SubmitSightingPayloadSchema.safeParse({
+      ...basePayload,
+      futureClientField: true,
+    }).success).toBe(false);
+    expect(SubmitSightingPayloadSchema.safeParse(basePayload).success).toBe(true);
+  });
+
+  it('never exposes observer email in Logbook rows and bounds pages', () => {
+    const item = {
+      behaviorNotes: null,
+      createdAt: '2026-07-17T12:01:00.000Z',
+      ecotypeGuess: null,
+      groupSize: null,
+      id: 'sighting-1',
+      latitude: 48.5,
+      locationName: null,
+      longitude: -123,
+      observedAt: '2026-07-17T12:00:00.000Z',
+      photoCount: 0,
+      rejectionReason: null,
+      status: 'PENDING',
+    } as const;
+    const page = { hasMore: false, nextCursor: null } as const;
+    const parsed = MySightingPageSchema.parse({ items: [item], page });
+
+    expect(parsed.items[0]).not.toHaveProperty('observerEmail');
+    expect(MySightingPageSchema.safeParse({
+      items: [{ ...item, observerEmail: 'observer@example.com' }],
+      page,
+    }).success).toBe(false);
+    expect(MySightingPageSchema.safeParse({
+      items: Array.from({ length: 101 }, () => item),
+      page,
+    }).success).toBe(false);
   });
 
   it('accepts only the canonical safe public error envelope', () => {

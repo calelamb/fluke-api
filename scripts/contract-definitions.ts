@@ -1,10 +1,12 @@
 import type { ZodType } from 'zod';
 import {
+  AuthAppleResponseSchema,
   CapabilitiesSchema,
   ExternalSightingPageSchema,
   HistoricalSightingPageSchema,
   HealthSchema,
   IdentifyResponseSchema,
+  MySightingPageSchema,
   PredictionSchema,
   RELEASE_A_CAPABILITIES,
   SafeErrorSchema,
@@ -105,6 +107,15 @@ const sightingFixture = {
 } as const;
 
 const fixtures = {
+  'auth-apple': {
+    csrfToken: 'fixture-csrf-token-value-at-least-thirty-two-characters',
+    user: {
+      displayName: 'Fixture Observer',
+      email: 'relay@fixtures.invalid',
+      id: 'fixture-observer-1',
+      role: 'OBSERVER',
+    },
+  },
   capabilities: {
     ...RELEASE_A_CAPABILITIES,
   },
@@ -129,6 +140,23 @@ const fixtures = {
   health: {
     status: 'ok',
     timestamp: FIXTURE_TIMESTAMP,
+  },
+  'my-sightings': {
+    items: [{
+      behaviorNotes: 'Synthetic observer notes for contract testing.',
+      createdAt: FIXTURE_TIMESTAMP,
+      ecotypeGuess: 'UNKNOWN',
+      groupSize: 4,
+      id: 'fixture-observer-sighting-1',
+      latitude: 12.345,
+      locationName: 'Fixture Strait',
+      longitude: -45.678,
+      observedAt: FIXTURE_TIMESTAMP,
+      photoCount: 1,
+      rejectionReason: null,
+      status: 'PENDING',
+    }],
+    page: { hasMore: false, nextCursor: null },
   },
   'historical-sightings': {
     items: [{
@@ -201,6 +229,12 @@ const fixtures = {
 
 export const contractDefinitions: readonly ContractDefinition[] = [
   {
+    fixture: fixtures['auth-apple'],
+    jsonSchemaTitle: 'AuthApple',
+    name: 'auth-apple',
+    schema: AuthAppleResponseSchema,
+  },
+  {
     fixture: fixtures.capabilities,
     jsonSchemaTitle: 'Capabilities',
     name: 'capabilities',
@@ -223,6 +257,12 @@ export const contractDefinitions: readonly ContractDefinition[] = [
     jsonSchemaTitle: 'HistoricalSightings',
     name: 'historical-sightings',
     schema: HistoricalSightingPageSchema,
+  },
+  {
+    fixture: fixtures['my-sightings'],
+    jsonSchemaTitle: 'MySightings',
+    name: 'my-sightings',
+    schema: MySightingPageSchema,
   },
   {
     fixture: fixtures.identify,

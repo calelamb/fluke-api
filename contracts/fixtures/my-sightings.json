@@ -1,0 +1,22 @@
+{
+  "items": [
+    {
+      "behaviorNotes": "Synthetic observer notes for contract testing.",
+      "createdAt": "2026-07-16T18:00:00.000Z",
+      "ecotypeGuess": "UNKNOWN",
+      "groupSize": 4,
+      "id": "fixture-observer-sighting-1",
+      "latitude": 12.345,
+      "locationName": "Fixture Strait",
+      "longitude": -45.678,
+      "observedAt": "2026-07-16T18:00:00.000Z",
+      "photoCount": 1,
+      "rejectionReason": null,
+      "status": "PENDING"
+    }
+  ],
+  "page": {
+    "hasMore": false,
+    "nextCursor": null
+  }
+}
