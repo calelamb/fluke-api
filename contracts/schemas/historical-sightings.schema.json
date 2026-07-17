@@ -1,0 +1,64 @@
+{
+  "$ref": "#/definitions/HistoricalSightings",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "HistoricalSightings": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "ecotypeGuess": {
+            "anyOf": [
+              {
+                "enum": [
+                  "RESIDENT",
+                  "BIGGS",
+                  "OFFSHORE",
+                  "UNKNOWN"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "latitude": {
+            "type": "number"
+          },
+          "locationName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "longitude": {
+            "type": "number"
+          },
+          "observedAt": {
+            "type": "string"
+          },
+          "whaleIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "observedAt",
+          "latitude",
+          "longitude",
+          "locationName",
+          "ecotypeGuess",
+          "whaleIds"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  }
+}

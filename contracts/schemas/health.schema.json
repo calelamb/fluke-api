@@ -1,0 +1,24 @@
+{
+  "$ref": "#/definitions/Health",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "Health": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "const": "ok",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "timestamp"
+      ],
+      "type": "object"
+    }
+  }
+}

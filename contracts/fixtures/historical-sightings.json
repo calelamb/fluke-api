@@ -1,0 +1,13 @@
+[
+  {
+    "ecotypeGuess": "RESIDENT",
+    "id": "historical-sighting-1",
+    "latitude": 48.516,
+    "locationName": "Salish Sea",
+    "longitude": -123.152,
+    "observedAt": "2025-07-16T18:00:00.000Z",
+    "whaleIds": [
+      "whale-j35"
+    ]
+  }
+]

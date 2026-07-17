@@ -1,0 +1,48 @@
+{
+  "biography": "A well-documented member of J pod.",
+  "birthYear": 1998,
+  "catalogId": "J35",
+  "deathYear": null,
+  "distinguishingMarks": "Distinctive dorsal fin and saddle patch.",
+  "ecotype": "RESIDENT",
+  "heroImageUrl": "https://fixtures.fluke.test/whales/j35.jpg",
+  "id": "whale-j35",
+  "mother": {
+    "catalogId": "J17",
+    "name": "Princess Angeline"
+  },
+  "name": "Tahlequah",
+  "notableEvents": [
+    {
+      "date": "2020-09-05",
+      "source": "Center for Whale Research",
+      "summary": "Observed traveling with a healthy calf.",
+      "type": "birth",
+      "year": 2020
+    }
+  ],
+  "offspring": [
+    {
+      "catalogId": "J57",
+      "name": "Phoenix"
+    }
+  ],
+  "pod": "J",
+  "recentSightings": [
+    {
+      "id": "sighting-salish-sea",
+      "latitude": 48.516,
+      "locationName": "Salish Sea",
+      "longitude": -123.152,
+      "observedAt": "2026-07-16T18:00:00.000Z"
+    }
+  ],
+  "sex": "FEMALE",
+  "sourceCitations": [
+    {
+      "label": "Orca Survey",
+      "url": "https://fixtures.fluke.test/sources/orca-survey"
+    }
+  ],
+  "status": "ALIVE"
+}

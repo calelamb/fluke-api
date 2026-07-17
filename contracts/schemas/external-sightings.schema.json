@@ -1,0 +1,95 @@
+{
+  "$ref": "#/definitions/ExternalSightings",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ExternalSightings": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "attribution": {
+            "type": "string"
+          },
+          "ecotypeGuess": {
+            "anyOf": [
+              {
+                "enum": [
+                  "RESIDENT",
+                  "BIGGS",
+                  "OFFSHORE",
+                  "UNKNOWN"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "externalId": {
+            "type": "string"
+          },
+          "groupSize": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "latitude": {
+            "type": "number"
+          },
+          "longitude": {
+            "type": "number"
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "observedAt": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "sourceUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "species": {
+            "type": "string"
+          },
+          "trusted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "externalId",
+          "observedAt",
+          "latitude",
+          "longitude",
+          "species",
+          "ecotypeGuess",
+          "groupSize",
+          "attribution",
+          "sourceUrl",
+          "notes",
+          "trusted"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  }
+}

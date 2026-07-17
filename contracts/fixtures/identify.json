@@ -1,0 +1,18 @@
+{
+  "confidenceBand": "high",
+  "indexVersion": "fixture-index-v1",
+  "matches": [
+    {
+      "catalogId": "J35",
+      "explanation": "Dorsal fin and saddle patch features are consistent.",
+      "matchedReferencePhotoIds": [
+        "reference-j35-left"
+      ],
+      "name": "Tahlequah",
+      "rank": 1,
+      "score": 0.94
+    }
+  ],
+  "model": "fixture-identifier-v1",
+  "uploadUrl": "https://fixtures.fluke.test/identify/upload-1.jpg"
+}

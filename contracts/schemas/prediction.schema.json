@@ -1,0 +1,50 @@
+{
+  "$ref": "#/definitions/Prediction",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "Prediction": {
+      "additionalProperties": false,
+      "properties": {
+        "cells": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "lat": {
+                "type": "number"
+              },
+              "lng": {
+                "type": "number"
+              },
+              "probability": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "lat",
+              "lng",
+              "probability"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "computedAt": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number"
+        },
+        "modelVersion": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cells",
+        "confidence",
+        "modelVersion",
+        "computedAt"
+      ],
+      "type": "object"
+    }
+  }
+}

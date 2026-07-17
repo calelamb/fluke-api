@@ -1,0 +1,80 @@
+{
+  "$ref": "#/definitions/Identify",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "Identify": {
+      "additionalProperties": false,
+      "properties": {
+        "confidenceBand": {
+          "enum": [
+            "high",
+            "medium",
+            "low",
+            "unavailable"
+          ],
+          "type": "string"
+        },
+        "indexVersion": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "matches": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "catalogId": {
+                "type": "string"
+              },
+              "explanation": {
+                "type": "string"
+              },
+              "matchedReferencePhotoIds": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "rank": {
+                "type": "integer"
+              },
+              "score": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "catalogId",
+              "name",
+              "score",
+              "rank",
+              "matchedReferencePhotoIds",
+              "explanation"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "model": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "uploadUrl": {
+          "format": "uri",
+          "type": "string"
+        }
+      },
+      "required": [
+        "matches",
+        "confidenceBand",
+        "model",
+        "indexVersion"
+      ],
+      "type": "object"
+    }
+  }
+}

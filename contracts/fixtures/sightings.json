@@ -1,0 +1,31 @@
+[
+  {
+    "behaviorNotes": "Traveling north in a close group.",
+    "ecotypeGuess": "RESIDENT",
+    "groupSize": 4,
+    "id": "sighting-salish-sea",
+    "identifiedWhales": [
+      {
+        "catalogId": "J35",
+        "confidence": "CONFIRMED",
+        "name": "Tahlequah"
+      }
+    ],
+    "latitude": 48.516,
+    "locationName": "Salish Sea",
+    "longitude": -123.152,
+    "observedAt": "2026-07-16T18:00:00.000Z",
+    "photos": [
+      {
+        "id": "photo-salish-sea-1",
+        "orderIndex": 0,
+        "thumbnailUrl": "https://fixtures.fluke.test/sightings/salish-sea-thumb.jpg",
+        "url": "https://fixtures.fluke.test/sightings/salish-sea.jpg"
+      }
+    ],
+    "photoUrls": [
+      "https://fixtures.fluke.test/sightings/salish-sea.jpg"
+    ],
+    "status": "APPROVED"
+  }
+]

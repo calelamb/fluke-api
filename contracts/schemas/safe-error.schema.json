@@ -1,0 +1,33 @@
+{
+  "$ref": "#/definitions/SafeError",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "SafeError": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "message": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "requestId": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "requestId",
+        "retryable"
+      ],
+      "type": "object"
+    }
+  }
+}

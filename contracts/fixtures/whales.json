@@ -1,0 +1,31 @@
+[
+  {
+    "biography": "A well-documented member of J pod.",
+    "birthYear": 1998,
+    "catalogId": "J35",
+    "deathYear": null,
+    "distinguishingMarks": "Distinctive dorsal fin and saddle patch.",
+    "ecotype": "RESIDENT",
+    "heroImageUrl": "https://fixtures.fluke.test/whales/j35.jpg",
+    "id": "whale-j35",
+    "name": "Tahlequah",
+    "notableEvents": [
+      {
+        "date": "2020-09-05",
+        "source": "Center for Whale Research",
+        "summary": "Observed traveling with a healthy calf.",
+        "type": "birth",
+        "year": 2020
+      }
+    ],
+    "pod": "J",
+    "sex": "FEMALE",
+    "sourceCitations": [
+      {
+        "label": "Orca Survey",
+        "url": "https://fixtures.fluke.test/sources/orca-survey"
+      }
+    ],
+    "status": "ALIVE"
+  }
+]

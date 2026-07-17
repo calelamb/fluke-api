@@ -1,0 +1,252 @@
+{
+  "$ref": "#/definitions/WhaleDetail",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "WhaleDetail": {
+      "additionalProperties": false,
+      "properties": {
+        "biography": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "birthYear": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "catalogId": {
+          "type": "string"
+        },
+        "deathYear": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "distinguishingMarks": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ecotype": {
+          "enum": [
+            "RESIDENT",
+            "BIGGS",
+            "OFFSHORE",
+            "UNKNOWN"
+          ],
+          "type": "string"
+        },
+        "heroImageUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "mother": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "catalogId": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "catalogId",
+                "name"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "notableEvents": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "date": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "birth",
+                  "death",
+                  "loss",
+                  "capture",
+                  "release",
+                  "pod-switch",
+                  "first-documented",
+                  "milestone"
+                ],
+                "type": "string"
+              },
+              "year": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "year",
+              "type",
+              "summary"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "offspring": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "catalogId": {
+                "type": "string"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "catalogId",
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "pod": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "recentSightings": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "latitude": {
+                "type": "number"
+              },
+              "locationName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "longitude": {
+                "type": "number"
+              },
+              "observedAt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "observedAt",
+              "locationName",
+              "latitude",
+              "longitude"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "sex": {
+          "enum": [
+            "MALE",
+            "FEMALE",
+            "UNKNOWN"
+          ],
+          "type": "string"
+        },
+        "sourceCitations": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "label",
+              "url"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "ALIVE",
+            "DECEASED",
+            "UNKNOWN"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "catalogId",
+        "name",
+        "ecotype",
+        "pod",
+        "sex",
+        "birthYear",
+        "deathYear",
+        "status",
+        "biography",
+        "distinguishingMarks",
+        "heroImageUrl",
+        "notableEvents",
+        "sourceCitations",
+        "mother",
+        "offspring",
+        "recentSightings"
+      ],
+      "type": "object"
+    }
+  }
+}

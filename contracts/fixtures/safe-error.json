@@ -1,0 +1,6 @@
+{
+  "code": "WHALE_NOT_FOUND",
+  "message": "Whale not found.",
+  "requestId": "request-contract-fixture",
+  "retryable": false
+}
