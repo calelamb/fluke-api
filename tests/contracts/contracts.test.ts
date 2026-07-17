@@ -139,4 +139,23 @@ describe('public API contracts', () => {
     };
     expect(SightingSchema.safeParse(sighting).success).toBe(false);
   });
+
+  it('keeps the retained identify artifact scheme-safe and nonempty', () => {
+    const identify = {
+      confidenceBand: 'high',
+      indexVersion: 'fixture-index-v1',
+      matches: [{
+        catalogId: '',
+        explanation: 'Synthetic explanation.',
+        matchedReferencePhotoIds: [''],
+        name: null,
+        rank: 1,
+        score: 0.9,
+      }],
+      model: 'fixture-model-v1',
+      uploadUrl: 'ftp://fixtures.invalid/upload.jpg',
+    };
+
+    expect(IdentifyResponseSchema.safeParse(identify).success).toBe(false);
+  });
 });

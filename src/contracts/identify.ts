@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { HttpUrlSchema, ProbabilitySchema, StableIdSchema } from './common.js';
 
 export const IdentifyConfidenceBandSchema = z.enum([
   'high',
@@ -8,20 +9,20 @@ export const IdentifyConfidenceBandSchema = z.enum([
 ]);
 
 export const IdentifyMatchSchema = z.object({
-  catalogId: z.string(),
+  catalogId: StableIdSchema,
   name: z.string().nullable(),
-  score: z.number(),
-  rank: z.number().int(),
-  matchedReferencePhotoIds: z.array(z.string()),
+  score: ProbabilitySchema,
+  rank: z.number().int().positive(),
+  matchedReferencePhotoIds: z.array(StableIdSchema),
   explanation: z.string(),
 });
 
 export const IdentifyResponseSchema = z.object({
   matches: z.array(IdentifyMatchSchema),
   confidenceBand: IdentifyConfidenceBandSchema,
-  model: z.string().min(1),
-  indexVersion: z.string().min(1),
-  uploadUrl: z.string().url().optional(),
+  model: StableIdSchema,
+  indexVersion: StableIdSchema,
+  uploadUrl: HttpUrlSchema.optional(),
 });
 
 export type IdentifyConfidenceBand = z.infer<typeof IdentifyConfidenceBandSchema>;

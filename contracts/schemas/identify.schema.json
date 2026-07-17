@@ -15,6 +15,7 @@
           "type": "string"
         },
         "indexVersion": {
+          "maxLength": 200,
           "minLength": 1,
           "type": "string"
         },
@@ -23,6 +24,8 @@
             "additionalProperties": false,
             "properties": {
               "catalogId": {
+                "maxLength": 200,
+                "minLength": 1,
                 "type": "string"
               },
               "explanation": {
@@ -30,6 +33,8 @@
               },
               "matchedReferencePhotoIds": {
                 "items": {
+                  "maxLength": 200,
+                  "minLength": 1,
                   "type": "string"
                 },
                 "type": "array"
@@ -41,9 +46,12 @@
                 ]
               },
               "rank": {
+                "exclusiveMinimum": 0,
                 "type": "integer"
               },
               "score": {
+                "maximum": 1,
+                "minimum": 0,
                 "type": "number"
               }
             },
@@ -60,11 +68,13 @@
           "type": "array"
         },
         "model": {
+          "maxLength": 200,
           "minLength": 1,
           "type": "string"
         },
         "uploadUrl": {
           "format": "uri",
+          "pattern": "^https?:\\/\\/",
           "type": "string"
         }
       },
