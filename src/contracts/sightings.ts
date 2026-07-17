@@ -9,24 +9,25 @@ import {
   LongitudeSchema,
   PageInfoSchema,
   PodSchema,
+  StableIdSchema,
   SightingStatusSchema,
 } from './common.js';
 
 export const SightingPhotoSchema = z.object({
-  id: z.string(),
+  id: StableIdSchema,
   url: HttpUrlSchema,
   thumbnailUrl: HttpUrlSchema,
   orderIndex: z.number().int(),
 });
 
 const IdentifiedWhaleSchema = z.object({
-  catalogId: z.string(),
+  catalogId: StableIdSchema,
   name: z.string().nullable(),
   confidence: IdConfidenceSchema,
 });
 
 export const SightingSchema = z.object({
-  id: z.string(),
+  id: StableIdSchema,
   observedAt: IsoDateTimeSchema,
   latitude: LatitudeSchema,
   longitude: LongitudeSchema,
@@ -76,9 +77,9 @@ export const SubmitSightingResponseSchema = z.object({
 });
 
 export const ExternalSightingSchema = z.object({
-  id: z.string(),
+  id: StableIdSchema,
   source: z.string(),
-  externalId: z.string(),
+  externalId: StableIdSchema,
   observedAt: IsoDateTimeSchema,
   latitude: LatitudeSchema,
   longitude: LongitudeSchema,
@@ -92,13 +93,13 @@ export const ExternalSightingSchema = z.object({
 });
 
 export const HistoricalSightingSchema = z.object({
-  id: z.string(),
+  id: StableIdSchema,
   observedAt: IsoDateTimeSchema,
   latitude: LatitudeSchema,
   longitude: LongitudeSchema,
   locationName: z.string().nullable(),
   ecotypeGuess: EcotypeSchema.nullable(),
-  whaleIds: z.array(z.string()),
+  whaleIds: z.array(StableIdSchema),
 });
 
 export const SightingsQuerySchema = z.object({

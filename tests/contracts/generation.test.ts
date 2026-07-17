@@ -80,6 +80,12 @@ describe('contract generation', () => {
         }),
       );
 
+      const whaleSchemaText = await readFile(
+        join(root, 'schemas', 'whales.schema.json'),
+        'utf8',
+      );
+      expect(whaleSchemaText).toContain('"pattern": "^https?:\\\\/\\\\/"');
+
       const fixtureCorpus = (
         await Promise.all(
           contractDefinitions.map(({ name }) =>

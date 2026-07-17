@@ -8,6 +8,7 @@ import {
   LongitudeSchema,
   PageInfoSchema,
   SexSchema,
+  StableIdSchema,
   WhaleStatusSchema,
 } from './common.js';
 
@@ -36,8 +37,8 @@ export const SourceCitationSchema = z.object({
 });
 
 export const WhaleSchema = z.object({
-  id: z.string(),
-  catalogId: z.string(),
+  id: StableIdSchema,
+  catalogId: StableIdSchema,
   name: z.string().nullable(),
   ecotype: EcotypeSchema,
   pod: z.string().nullable(),
@@ -53,12 +54,12 @@ export const WhaleSchema = z.object({
 });
 
 const WhaleRelationSchema = z.object({
-  catalogId: z.string(),
+  catalogId: StableIdSchema,
   name: z.string().nullable(),
 });
 
 const RecentSightingSchema = z.object({
-  id: z.string(),
+  id: StableIdSchema,
   observedAt: IsoDateTimeSchema,
   locationName: z.string().nullable(),
   latitude: LatitudeSchema,
@@ -82,7 +83,7 @@ export const WhalePageSchema = z.object({
 }).strict();
 
 export const MovementTrackPointSchema = z.object({
-  id: z.string().min(1),
+  id: StableIdSchema,
   observedAt: IsoDateTimeSchema,
   latitude: LatitudeSchema,
   longitude: LongitudeSchema,
@@ -91,8 +92,8 @@ export const MovementTrackPointSchema = z.object({
 }).strict();
 
 export const WhaleTrackSchema = z.object({
-  whaleId: z.string().min(1),
-  catalogId: z.string().min(1),
+  whaleId: StableIdSchema,
+  catalogId: StableIdSchema,
   points: z.array(MovementTrackPointSchema).max(1000),
 }).strict();
 

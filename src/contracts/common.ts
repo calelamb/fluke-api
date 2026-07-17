@@ -4,10 +4,8 @@ export const IsoDateTimeSchema = z.string().datetime({ offset: true });
 export const LatitudeSchema = z.number().finite().min(-90).max(90);
 export const LongitudeSchema = z.number().finite().min(-180).max(180);
 export const ProbabilitySchema = z.number().finite().min(0).max(1);
-export const HttpUrlSchema = z.string().url().refine(
-  (value) => value.startsWith('https://') || value.startsWith('http://'),
-  'URL must use http or https',
-);
+export const HttpUrlSchema = z.string().url().regex(/^https?:\/\//, 'URL must use http or https');
+export const StableIdSchema = z.string().min(1).max(200);
 export const CursorSchema = z.string().min(1).max(512);
 export const PageInfoSchema = z.discriminatedUnion('hasMore', [
   z.object({

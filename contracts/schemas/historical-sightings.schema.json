@@ -26,6 +26,8 @@
                 ]
               },
               "id": {
+                "maxLength": 200,
+                "minLength": 1,
                 "type": "string"
               },
               "latitude": {
@@ -50,6 +52,8 @@
               },
               "whaleIds": {
                 "items": {
+                  "maxLength": 200,
+                  "minLength": 1,
                   "type": "string"
                 },
                 "type": "array"

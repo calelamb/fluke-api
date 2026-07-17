@@ -22,6 +22,8 @@
           ]
         },
         "catalogId": {
+          "maxLength": 200,
+          "minLength": 1,
           "type": "string"
         },
         "deathYear": {
@@ -53,6 +55,7 @@
           "anyOf": [
             {
               "format": "uri",
+              "pattern": "^https?:\\/\\/",
               "type": "string"
             },
             {
@@ -61,6 +64,8 @@
           ]
         },
         "id": {
+          "maxLength": 200,
+          "minLength": 1,
           "type": "string"
         },
         "mother": {
@@ -69,6 +74,8 @@
               "additionalProperties": false,
               "properties": {
                 "catalogId": {
+                  "maxLength": 200,
+                  "minLength": 1,
                   "type": "string"
                 },
                 "name": {
@@ -139,6 +146,8 @@
             "additionalProperties": false,
             "properties": {
               "catalogId": {
+                "maxLength": 200,
+                "minLength": 1,
                 "type": "string"
               },
               "name": {
@@ -167,6 +176,8 @@
             "additionalProperties": false,
             "properties": {
               "id": {
+                "maxLength": 200,
+                "minLength": 1,
                 "type": "string"
               },
               "latitude": {
@@ -218,6 +229,7 @@
               },
               "url": {
                 "format": "uri",
+                "pattern": "^https?:\\/\\/",
                 "type": "string"
               }
             },

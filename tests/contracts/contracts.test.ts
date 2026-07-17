@@ -6,15 +6,15 @@ import {
   PublicErrorCodeSchema,
   SafeErrorSchema,
   SightingsQuerySchema,
+  SightingSchema,
   WhaleTrackSchema,
+  WhaleSchema,
   WhalesQuerySchema,
   ExternalSightingSchema,
   IdentifyResponseSchema,
   PredictionSchema,
-  SightingSchema,
   SubmitSightingPayloadSchema,
   WhaleProfileSchema,
-  WhaleSchema,
 } from '../../src/contracts/index.js';
 
 describe('public API contracts', () => {
@@ -102,5 +102,41 @@ describe('public API contracts', () => {
     expect(PageInfoSchema.safeParse({ hasMore: true, nextCursor: null }).success).toBe(false);
     expect(PageInfoSchema.safeParse({ hasMore: false, nextCursor: 'unexpected' }).success).toBe(false);
     expect(PageInfoSchema.safeParse({ hasMore: true, nextCursor: 'cursor-1' }).success).toBe(true);
+  });
+
+  it('rejects empty stable identifiers in public list records', () => {
+    const whale = {
+      biography: null,
+      birthYear: null,
+      catalogId: 'FX-001',
+      deathYear: null,
+      distinguishingMarks: null,
+      ecotype: 'UNKNOWN',
+      heroImageUrl: null,
+      id: '',
+      name: null,
+      notableEvents: [],
+      pod: null,
+      sex: 'UNKNOWN',
+      sourceCitations: [],
+      status: 'UNKNOWN',
+    };
+    expect(WhaleSchema.safeParse(whale).success).toBe(false);
+
+    const sighting = {
+      behaviorNotes: null,
+      ecotypeGuess: null,
+      groupSize: null,
+      id: '',
+      identifiedWhales: [],
+      latitude: 48.5,
+      locationName: null,
+      longitude: -123.25,
+      observedAt: '2026-07-16T18:00:00.000Z',
+      photoUrls: [],
+      photos: [],
+      status: 'APPROVED',
+    };
+    expect(SightingSchema.safeParse(sighting).success).toBe(false);
   });
 });

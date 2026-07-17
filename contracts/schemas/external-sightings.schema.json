@@ -29,6 +29,8 @@
                 ]
               },
               "externalId": {
+                "maxLength": 200,
+                "minLength": 1,
                 "type": "string"
               },
               "groupSize": {
@@ -42,6 +44,8 @@
                 ]
               },
               "id": {
+                "maxLength": 200,
+                "minLength": 1,
                 "type": "string"
               },
               "latitude": {
@@ -71,6 +75,7 @@
                 "anyOf": [
                   {
                     "format": "uri",
+                    "pattern": "^https?:\\/\\/",
                     "type": "string"
                   },
                   {
