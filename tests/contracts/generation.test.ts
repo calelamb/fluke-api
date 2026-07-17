@@ -85,6 +85,7 @@ describe('contract generation', () => {
         'utf8',
       );
       expect(whaleSchemaText).toContain('"pattern": "^https?:\\\\/\\\\/"');
+      expect(whaleSchemaText).toContain('"pattern": "\\\\S"');
 
       const fixtureCorpus = (
         await Promise.all(

@@ -113,6 +113,10 @@ describe('normalizeAcartiaSighting', () => {
       ...baseRaw,
       photo_url: 'https://provider.example/photo.jpg',
     })?.sourceUrl).toBe('https://provider.example/photo.jpg');
+    expect(normalizeAcartiaSighting({
+      ...baseRaw,
+      photo_url: 'https://provider.example/'.padEnd(2_049, 'a'),
+    })?.sourceUrl).toBeNull();
   });
 });
 

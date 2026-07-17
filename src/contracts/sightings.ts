@@ -1,12 +1,15 @@
 import { z } from 'zod';
 import {
+  BoundedTextSchema,
   CursorSchema,
   EcotypeSchema,
+  GroupSizeSchema,
   HttpUrlSchema,
   IdConfidenceSchema,
   IsoDateTimeSchema,
   LatitudeSchema,
   LongitudeSchema,
+  MAX_NESTED_ITEMS,
   PageInfoSchema,
   PodSchema,
   StableIdSchema,
@@ -22,7 +25,7 @@ export const SightingPhotoSchema = z.object({
 
 const IdentifiedWhaleSchema = z.object({
   catalogId: StableIdSchema,
-  name: z.string().nullable(),
+  name: BoundedTextSchema.nullable(),
   confidence: IdConfidenceSchema,
 });
 
@@ -31,14 +34,14 @@ export const SightingSchema = z.object({
   observedAt: IsoDateTimeSchema,
   latitude: LatitudeSchema,
   longitude: LongitudeSchema,
-  locationName: z.string().nullable(),
+  locationName: BoundedTextSchema.nullable(),
   ecotypeGuess: EcotypeSchema.nullable(),
-  groupSize: z.number().int().nullable(),
-  behaviorNotes: z.string().nullable(),
+  groupSize: GroupSizeSchema.nullable(),
+  behaviorNotes: BoundedTextSchema.nullable(),
   status: SightingStatusSchema,
-  photoUrls: z.array(HttpUrlSchema),
-  photos: z.array(SightingPhotoSchema),
-  identifiedWhales: z.array(IdentifiedWhaleSchema),
+  photoUrls: z.array(HttpUrlSchema).max(MAX_NESTED_ITEMS),
+  photos: z.array(SightingPhotoSchema).max(MAX_NESTED_ITEMS),
+  identifiedWhales: z.array(IdentifiedWhaleSchema).max(MAX_NESTED_ITEMS),
 });
 
 export const PendingSightingSchema = z.object({
@@ -78,17 +81,17 @@ export const SubmitSightingResponseSchema = z.object({
 
 export const ExternalSightingSchema = z.object({
   id: StableIdSchema,
-  source: z.string(),
+  source: BoundedTextSchema,
   externalId: StableIdSchema,
   observedAt: IsoDateTimeSchema,
   latitude: LatitudeSchema,
   longitude: LongitudeSchema,
-  species: z.string(),
+  species: BoundedTextSchema,
   ecotypeGuess: EcotypeSchema.nullable(),
-  groupSize: z.number().int().nullable(),
-  attribution: z.string(),
+  groupSize: GroupSizeSchema.nullable(),
+  attribution: BoundedTextSchema,
   sourceUrl: HttpUrlSchema.nullable(),
-  notes: z.string().nullable(),
+  notes: BoundedTextSchema.nullable(),
   trusted: z.boolean(),
 });
 
@@ -97,9 +100,9 @@ export const HistoricalSightingSchema = z.object({
   observedAt: IsoDateTimeSchema,
   latitude: LatitudeSchema,
   longitude: LongitudeSchema,
-  locationName: z.string().nullable(),
+  locationName: BoundedTextSchema.nullable(),
   ecotypeGuess: EcotypeSchema.nullable(),
-  whaleIds: z.array(StableIdSchema),
+  whaleIds: z.array(StableIdSchema).max(MAX_NESTED_ITEMS),
 });
 
 export const SightingsQuerySchema = z.object({

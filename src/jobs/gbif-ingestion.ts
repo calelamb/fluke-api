@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_URL_LENGTH } from '../contracts/common.js';
 import type { ExternalSightingInput } from './external-sighting-writer.js';
 import { fetchJsonWithRetry } from './provider-client.js';
 
@@ -56,10 +57,14 @@ function inferEcotype(record: GbifRecord): ExternalSightingInput['ecotypeGuess']
 }
 
 function safeSourceUrl(record: GbifRecord): string {
-  if (record.references) {
+  if (record.references && record.references.length <= MAX_URL_LENGTH) {
     try {
       const parsed = new URL(record.references);
-      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') return parsed.toString();
+      const normalized = parsed.toString();
+      if ((parsed.protocol === 'https:' || parsed.protocol === 'http:')
+        && normalized.length <= MAX_URL_LENGTH) {
+        return normalized;
+      }
     } catch {
       // Fall through to the stable GBIF record URL.
     }

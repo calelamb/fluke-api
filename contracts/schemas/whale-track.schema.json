@@ -8,6 +8,7 @@
         "catalogId": {
           "maxLength": 200,
           "minLength": 1,
+          "pattern": "\\S",
           "type": "string"
         },
         "points": {
@@ -15,14 +16,20 @@
             "additionalProperties": false,
             "properties": {
               "behaviorNotes": {
-                "type": [
-                  "string",
-                  "null"
+                "anyOf": [
+                  {
+                    "maxLength": 20000,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "id": {
                 "maxLength": 200,
                 "minLength": 1,
+                "pattern": "\\S",
                 "type": "string"
               },
               "latitude": {
@@ -31,9 +38,14 @@
                 "type": "number"
               },
               "locationName": {
-                "type": [
-                  "string",
-                  "null"
+                "anyOf": [
+                  {
+                    "maxLength": 20000,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "longitude": {
@@ -62,6 +74,7 @@
         "whaleId": {
           "maxLength": 200,
           "minLength": 1,
+          "pattern": "\\S",
           "type": "string"
         }
       },

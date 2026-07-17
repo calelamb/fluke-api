@@ -1,15 +1,18 @@
 import { z } from 'zod';
 import {
+  BoundedTextSchema,
   CursorSchema,
   EcotypeSchema,
   HttpUrlSchema,
   IsoDateTimeSchema,
   LatitudeSchema,
   LongitudeSchema,
+  MAX_NESTED_ITEMS,
   PageInfoSchema,
   SexSchema,
   StableIdSchema,
   WhaleStatusSchema,
+  YearSchema,
 } from './common.js';
 
 export const NotableEventTypeSchema = z.enum([
@@ -24,52 +27,52 @@ export const NotableEventTypeSchema = z.enum([
 ]);
 
 export const NotableEventSchema = z.object({
-  year: z.number(),
-  date: z.string().optional(),
+  year: YearSchema,
+  date: BoundedTextSchema.optional(),
   type: NotableEventTypeSchema,
-  summary: z.string(),
-  source: z.string().optional(),
+  summary: BoundedTextSchema,
+  source: BoundedTextSchema.optional(),
 });
 
 export const SourceCitationSchema = z.object({
-  label: z.string(),
+  label: BoundedTextSchema,
   url: HttpUrlSchema,
 });
 
 export const WhaleSchema = z.object({
   id: StableIdSchema,
   catalogId: StableIdSchema,
-  name: z.string().nullable(),
+  name: BoundedTextSchema.nullable(),
   ecotype: EcotypeSchema,
-  pod: z.string().nullable(),
+  pod: BoundedTextSchema.nullable(),
   sex: SexSchema,
-  birthYear: z.number().int().nullable(),
-  deathYear: z.number().int().nullable(),
+  birthYear: YearSchema.nullable(),
+  deathYear: YearSchema.nullable(),
   status: WhaleStatusSchema,
-  biography: z.string().nullable(),
-  distinguishingMarks: z.string().nullable(),
+  biography: BoundedTextSchema.nullable(),
+  distinguishingMarks: BoundedTextSchema.nullable(),
   heroImageUrl: HttpUrlSchema.nullable(),
-  notableEvents: z.array(NotableEventSchema),
-  sourceCitations: z.array(SourceCitationSchema),
+  notableEvents: z.array(NotableEventSchema).max(MAX_NESTED_ITEMS),
+  sourceCitations: z.array(SourceCitationSchema).max(MAX_NESTED_ITEMS),
 });
 
 const WhaleRelationSchema = z.object({
   catalogId: StableIdSchema,
-  name: z.string().nullable(),
+  name: BoundedTextSchema.nullable(),
 });
 
 const RecentSightingSchema = z.object({
   id: StableIdSchema,
   observedAt: IsoDateTimeSchema,
-  locationName: z.string().nullable(),
+  locationName: BoundedTextSchema.nullable(),
   latitude: LatitudeSchema,
   longitude: LongitudeSchema,
 });
 
 export const WhaleProfileSchema = WhaleSchema.extend({
   mother: WhaleRelationSchema.nullable(),
-  offspring: z.array(WhaleRelationSchema),
-  recentSightings: z.array(RecentSightingSchema),
+  offspring: z.array(WhaleRelationSchema).max(MAX_NESTED_ITEMS),
+  recentSightings: z.array(RecentSightingSchema).max(MAX_NESTED_ITEMS),
 });
 
 export const WhalesQuerySchema = z.object({
@@ -87,14 +90,14 @@ export const MovementTrackPointSchema = z.object({
   observedAt: IsoDateTimeSchema,
   latitude: LatitudeSchema,
   longitude: LongitudeSchema,
-  locationName: z.string().nullable(),
-  behaviorNotes: z.string().nullable(),
+  locationName: BoundedTextSchema.nullable(),
+  behaviorNotes: BoundedTextSchema.nullable(),
 }).strict();
 
 export const WhaleTrackSchema = z.object({
   whaleId: StableIdSchema,
   catalogId: StableIdSchema,
-  points: z.array(MovementTrackPointSchema).max(1000),
+  points: z.array(MovementTrackPointSchema).max(MAX_NESTED_ITEMS),
 }).strict();
 
 export type NotableEventType = z.infer<typeof NotableEventTypeSchema>;

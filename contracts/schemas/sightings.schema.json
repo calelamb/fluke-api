@@ -10,9 +10,14 @@
             "additionalProperties": false,
             "properties": {
               "behaviorNotes": {
-                "type": [
-                  "string",
-                  "null"
+                "anyOf": [
+                  {
+                    "maxLength": 20000,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "ecotypeGuess": {
@@ -34,6 +39,8 @@
               "groupSize": {
                 "anyOf": [
                   {
+                    "maximum": 200,
+                    "minimum": 1,
                     "type": "integer"
                   },
                   {
@@ -44,6 +51,7 @@
               "id": {
                 "maxLength": 200,
                 "minLength": 1,
+                "pattern": "\\S",
                 "type": "string"
               },
               "identifiedWhales": {
@@ -53,6 +61,7 @@
                     "catalogId": {
                       "maxLength": 200,
                       "minLength": 1,
+                      "pattern": "\\S",
                       "type": "string"
                     },
                     "confidence": {
@@ -64,9 +73,14 @@
                       "type": "string"
                     },
                     "name": {
-                      "type": [
-                        "string",
-                        "null"
+                      "anyOf": [
+                        {
+                          "maxLength": 20000,
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
                       ]
                     }
                   },
@@ -77,6 +91,7 @@
                   ],
                   "type": "object"
                 },
+                "maxItems": 1000,
                 "type": "array"
               },
               "latitude": {
@@ -85,9 +100,14 @@
                 "type": "number"
               },
               "locationName": {
-                "type": [
-                  "string",
-                  "null"
+                "anyOf": [
+                  {
+                    "maxLength": 20000,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "longitude": {
@@ -102,9 +122,11 @@
               "photoUrls": {
                 "items": {
                   "format": "uri",
+                  "maxLength": 2048,
                   "pattern": "^https?:\\/\\/",
                   "type": "string"
                 },
+                "maxItems": 1000,
                 "type": "array"
               },
               "photos": {
@@ -114,6 +136,7 @@
                     "id": {
                       "maxLength": 200,
                       "minLength": 1,
+                      "pattern": "\\S",
                       "type": "string"
                     },
                     "orderIndex": {
@@ -121,11 +144,13 @@
                     },
                     "thumbnailUrl": {
                       "format": "uri",
+                      "maxLength": 2048,
                       "pattern": "^https?:\\/\\/",
                       "type": "string"
                     },
                     "url": {
                       "format": "uri",
+                      "maxLength": 2048,
                       "pattern": "^https?:\\/\\/",
                       "type": "string"
                     }
@@ -138,6 +163,7 @@
                   ],
                   "type": "object"
                 },
+                "maxItems": 1000,
                 "type": "array"
               },
               "status": {

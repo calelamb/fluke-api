@@ -17,6 +17,7 @@
         "indexVersion": {
           "maxLength": 200,
           "minLength": 1,
+          "pattern": "\\S",
           "type": "string"
         },
         "matches": {
@@ -26,6 +27,7 @@
               "catalogId": {
                 "maxLength": 200,
                 "minLength": 1,
+                "pattern": "\\S",
                 "type": "string"
               },
               "explanation": {
@@ -35,6 +37,7 @@
                 "items": {
                   "maxLength": 200,
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array"
@@ -70,10 +73,12 @@
         "model": {
           "maxLength": 200,
           "minLength": 1,
+          "pattern": "\\S",
           "type": "string"
         },
         "uploadUrl": {
           "format": "uri",
+          "maxLength": 2048,
           "pattern": "^https?:\\/\\/",
           "type": "string"
         }

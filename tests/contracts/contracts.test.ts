@@ -158,4 +158,73 @@ describe('public API contracts', () => {
 
     expect(IdentifyResponseSchema.safeParse(identify).success).toBe(false);
   });
+
+  it('enforces the shared Release A scalar bounds', () => {
+    const maximumURL = 'https://fixtures.invalid/'.padEnd(2_048, 'a');
+    const whale = {
+      biography: 'a'.repeat(20_000),
+      birthYear: 1000,
+      catalogId: 'FX-001',
+      deathYear: 9999,
+      distinguishingMarks: null,
+      ecotype: 'UNKNOWN',
+      heroImageUrl: maximumURL,
+      id: 'fixture-whale',
+      name: null,
+      notableEvents: [],
+      pod: null,
+      sex: 'UNKNOWN',
+      sourceCitations: [],
+      status: 'DECEASED',
+    };
+    const sighting = {
+      behaviorNotes: null,
+      ecotypeGuess: null,
+      groupSize: 200,
+      id: 'fixture-sighting',
+      identifiedWhales: [],
+      latitude: 48.5,
+      locationName: null,
+      longitude: -123.25,
+      observedAt: '2026-07-16T18:00:00.000Z',
+      photoUrls: [],
+      photos: [],
+      status: 'APPROVED',
+    };
+
+    expect(WhaleSchema.safeParse(whale).success).toBe(true);
+    expect(SightingSchema.safeParse(sighting).success).toBe(true);
+    expect(WhaleSchema.safeParse({ ...whale, biography: 'a'.repeat(20_001) }).success).toBe(false);
+    expect(WhaleSchema.safeParse({ ...whale, birthYear: 999 }).success).toBe(false);
+    expect(WhaleSchema.safeParse({ ...whale, deathYear: 10_000 }).success).toBe(false);
+    expect(WhaleSchema.safeParse({ ...whale, heroImageUrl: `${maximumURL}a` }).success).toBe(false);
+    expect(SightingSchema.safeParse({ ...sighting, groupSize: 0 }).success).toBe(false);
+    expect(SightingSchema.safeParse({ ...sighting, groupSize: 201 }).success).toBe(false);
+  });
+
+  it('enforces the shared Release A nested cardinality bound', () => {
+    const citation = { label: 'Fixture citation', url: 'https://fixtures.invalid/source' };
+    const whale = {
+      biography: null,
+      birthYear: null,
+      catalogId: 'FX-001',
+      deathYear: null,
+      distinguishingMarks: null,
+      ecotype: 'UNKNOWN',
+      heroImageUrl: null,
+      id: 'fixture-whale',
+      name: null,
+      notableEvents: [],
+      pod: null,
+      sex: 'UNKNOWN',
+      sourceCitations: Array.from({ length: 1_000 }, () => citation),
+      status: 'UNKNOWN',
+    };
+
+    expect(WhaleSchema.safeParse(whale).success).toBe(true);
+    expect(WhaleSchema.safeParse({
+      ...whale,
+      sourceCitations: [...whale.sourceCitations, citation],
+    }).success).toBe(false);
+  });
 });

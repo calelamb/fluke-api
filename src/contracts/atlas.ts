@@ -1,5 +1,12 @@
 import { z } from 'zod';
-import { IsoDateTimeSchema, LatitudeSchema, LongitudeSchema, ProbabilitySchema } from './common.js';
+import {
+  BoundedTextSchema,
+  IsoDateTimeSchema,
+  LatitudeSchema,
+  LongitudeSchema,
+  MAX_NESTED_ITEMS,
+  ProbabilitySchema,
+} from './common.js';
 
 export const PredictionCellSchema = z.object({
   lat: LatitudeSchema,
@@ -8,9 +15,9 @@ export const PredictionCellSchema = z.object({
 });
 
 export const PredictionSchema = z.object({
-  cells: z.array(PredictionCellSchema),
+  cells: z.array(PredictionCellSchema).max(MAX_NESTED_ITEMS),
   confidence: ProbabilitySchema,
-  modelVersion: z.string(),
+  modelVersion: BoundedTextSchema,
   computedAt: IsoDateTimeSchema,
 });
 

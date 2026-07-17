@@ -10,6 +10,7 @@
             "additionalProperties": false,
             "properties": {
               "attribution": {
+                "maxLength": 20000,
                 "type": "string"
               },
               "ecotypeGuess": {
@@ -31,11 +32,14 @@
               "externalId": {
                 "maxLength": 200,
                 "minLength": 1,
+                "pattern": "\\S",
                 "type": "string"
               },
               "groupSize": {
                 "anyOf": [
                   {
+                    "maximum": 200,
+                    "minimum": 1,
                     "type": "integer"
                   },
                   {
@@ -46,6 +50,7 @@
               "id": {
                 "maxLength": 200,
                 "minLength": 1,
+                "pattern": "\\S",
                 "type": "string"
               },
               "latitude": {
@@ -59,9 +64,14 @@
                 "type": "number"
               },
               "notes": {
-                "type": [
-                  "string",
-                  "null"
+                "anyOf": [
+                  {
+                    "maxLength": 20000,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "observedAt": {
@@ -69,12 +79,14 @@
                 "type": "string"
               },
               "source": {
+                "maxLength": 20000,
                 "type": "string"
               },
               "sourceUrl": {
                 "anyOf": [
                   {
                     "format": "uri",
+                    "maxLength": 2048,
                     "pattern": "^https?:\\/\\/",
                     "type": "string"
                   },
@@ -84,6 +96,7 @@
                 ]
               },
               "species": {
+                "maxLength": 20000,
                 "type": "string"
               },
               "trusted": {

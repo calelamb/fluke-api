@@ -1,11 +1,29 @@
 import { z } from 'zod';
 
+export const MAX_ID_LENGTH = 200;
+export const MAX_TEXT_LENGTH = 20_000;
+export const MAX_URL_LENGTH = 2_048;
+export const MAX_NESTED_ITEMS = 1_000;
+export const MIN_YEAR = 1_000;
+export const MAX_YEAR = 9_999;
+export const MIN_GROUP_SIZE = 1;
+export const MAX_GROUP_SIZE = 200;
+
 export const IsoDateTimeSchema = z.string().datetime({ offset: true });
 export const LatitudeSchema = z.number().finite().min(-90).max(90);
 export const LongitudeSchema = z.number().finite().min(-180).max(180);
 export const ProbabilitySchema = z.number().finite().min(0).max(1);
-export const HttpUrlSchema = z.string().url().regex(/^https?:\/\//, 'URL must use http or https');
-export const StableIdSchema = z.string().min(1).max(200);
+export const BoundedTextSchema = z.string().max(MAX_TEXT_LENGTH);
+export const YearSchema = z.number().int().min(MIN_YEAR).max(MAX_YEAR);
+export const GroupSizeSchema = z.number().int().min(MIN_GROUP_SIZE).max(MAX_GROUP_SIZE);
+export const HttpUrlSchema = z.string()
+  .max(MAX_URL_LENGTH)
+  .url()
+  .regex(/^https?:\/\//, 'URL must use http or https');
+export const StableIdSchema = z.string()
+  .min(1)
+  .max(MAX_ID_LENGTH)
+  .regex(/\S/, 'ID must contain a non-whitespace character');
 export const CursorSchema = z.string().min(1).max(512);
 export const PageInfoSchema = z.discriminatedUnion('hasMore', [
   z.object({

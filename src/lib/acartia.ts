@@ -9,6 +9,7 @@
 // License: Creative Commons; honor attribution per data_source_entity.
 
 import { z } from 'zod';
+import { MAX_URL_LENGTH } from '../contracts/common.js';
 import { fetchJsonWithRetry } from '../jobs/provider-client.js';
 
 const ACARTIA_CURRENT_URL = 'https://acartia.io/api/v1/sightings/current';
@@ -101,11 +102,13 @@ function isFiniteCoord(lat: number, lng: number): boolean {
 }
 
 function safeHttpUrl(value: string | null | undefined): string | null {
-  if (!value) return null;
+  if (!value || value.length > MAX_URL_LENGTH) return null;
   try {
     const parsed = new URL(value);
-    return parsed.protocol === 'https:' || parsed.protocol === 'http:'
-      ? parsed.toString()
+    const normalized = parsed.toString();
+    return (parsed.protocol === 'https:' || parsed.protocol === 'http:')
+      && normalized.length <= MAX_URL_LENGTH
+      ? normalized
       : null;
   } catch {
     return null;

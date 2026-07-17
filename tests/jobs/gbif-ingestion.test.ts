@@ -31,6 +31,21 @@ describe('fetchGbifSightings', () => {
     ]);
   });
 
+  it('falls back to the stable record URL when provider references are oversized', async () => {
+    const fetchImpl = vi.fn(async () => page([{
+      ...record,
+      references: 'https://provider.example/'.padEnd(2_049, 'a'),
+    }], true));
+
+    const result = await fetchGbifSightings({
+      fetchImpl,
+      signal: new AbortController().signal,
+      years: 5,
+    });
+
+    expect(result[0]?.sourceUrl).toBe('https://www.gbif.org/occurrence/42');
+  });
+
   it('rejects an unsafe lookback before calling the provider', async () => {
     const fetchImpl = vi.fn(async () => page([], true));
 
