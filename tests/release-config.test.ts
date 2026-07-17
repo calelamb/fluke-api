@@ -8,6 +8,15 @@ function readRepositoryFile(relativePath: string): string {
   return readFileSync(`${repositoryRoot}${relativePath}`, 'utf8');
 }
 
+function expectInOrder(document: string, fragments: readonly string[]): void {
+  fragments.reduce((previousIndex, fragment) => {
+    const currentIndex = document.indexOf(fragment);
+    expect(currentIndex, `Missing release operation: ${fragment}`).toBeGreaterThan(-1);
+    expect(currentIndex, `Out-of-order release operation: ${fragment}`).toBeGreaterThan(previousIndex);
+    return currentIndex;
+  }, -1);
+}
+
 describe('release configuration', () => {
   it('smokes the pruned runtime with production settings', () => {
     const workflow = readRepositoryFile('.github/workflows/ci.yml');
@@ -182,5 +191,104 @@ describe('release configuration', () => {
     expect(entrypoint).toContain('Promise.race([closeResources(), timeoutPromise])');
     expect(entrypoint).toContain('prisma.$disconnect()');
     expect(entrypoint).toContain('process.exit(1)');
+  });
+
+  it('documents the same-SHA observer launch sequence and identify stop gate', () => {
+    const deployment = readRepositoryFile('docs/deployment.md');
+
+    expectInOrder(deployment, [
+      '## Same-SHA CI gate',
+      '## Database gate',
+      '## Configure secrets while mutations remain off',
+      '## Safe all-off deploy',
+      '## Enable observer launch state',
+      '## Physical TestFlight Apple gate',
+    ]);
+    for (const gate of [
+      'same Git SHA',
+      'Neon restore point',
+      '20260717170000_add_observer_submissions',
+      'ENABLE_ACCOUNTS=false',
+      '/api/v1/health',
+      'physical TestFlight device',
+      'PRODUCTION_MUTATIONS_ACK=true',
+      '{"accounts":true,"identification":false,"submissions":true}',
+      'media survives an API redeploy',
+    ]) {
+      expect(deployment).toContain(gate);
+    }
+    expect(deployment).toContain('ENABLE_SUBMISSIONS=true');
+    expect(deployment).toContain('ENABLE_IDENTIFY=false');
+    expect(deployment).toContain('POST /api/v1/identify must return 404');
+    expect(deployment).toContain('Render Free');
+    expect(deployment).toContain('Do not upgrade');
+  });
+
+  it('defines fake-free production certification with explicit stop conditions', () => {
+    const operations = readRepositoryFile('docs/observer-operations.md');
+
+    for (const operation of [
+      'anonymous submission',
+      'signed submission',
+      'exact offline replay',
+      '/api/v1/sightings/me',
+      'Observer A',
+      'Observer B',
+      'signed media',
+      'DELETE /api/v1/auth/account',
+      'Apple authorization',
+      'orphaned object',
+      'one database row',
+    ]) {
+      expect(operations).toContain(operation);
+    }
+    for (const stopCondition of [
+      'non-200 health or readiness',
+      'migration',
+      'storage cleanup',
+      'Apple verification',
+      'capability mismatch',
+      'Identify route exposure',
+      'cross-user access',
+      'duplicate replay row',
+      'failed deletion',
+    ]) {
+      expect(operations).toContain(stopCondition);
+    }
+  });
+
+  it('rolls observer flags off before reverting code while preserving durable state', () => {
+    const rollback = readRepositoryFile('docs/rollback.md');
+
+    expectInOrder(rollback, [
+      'ENABLE_ACCOUNTS=false',
+      'ENABLE_SUBMISSIONS=false',
+      'ENABLE_IDENTIFY=false',
+      'redeploy',
+      'return 404',
+      'preserve the database and private object bucket',
+      'redeploy the previous image',
+    ]);
+    expect(rollback).toContain('/api/v1/health');
+    expect(rollback).toContain('/api/v1/ready');
+  });
+
+  it('restores into a recorded database identity and reconciles observer security state', () => {
+    const restore = readRepositoryFile('docs/restore.md');
+
+    for (const requirement of [
+      'Neon restore point',
+      'database identity',
+      'object inventory',
+      'reconciliation',
+      'sessionVersion',
+      'no restored observer session becomes valid',
+      'OBSERVER_JWT_SECRET',
+      'OBSERVER_CSRF_SECRET',
+      'APPLE_TOKEN_ENCRYPTION_KEY',
+      'object-storage credentials',
+    ]) {
+      expect(restore).toContain(requirement);
+    }
   });
 });
