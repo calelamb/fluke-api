@@ -61,4 +61,26 @@ describe('provider ingestion jobs', () => {
     expect(runFenced).toHaveBeenCalledOnce();
     expect(upsert).toHaveBeenCalledOnce();
   });
+
+  it('bounds each fenced transaction for large provider responses', async () => {
+    const upsert = vi.fn(async () => undefined);
+    const runFenced = vi.fn(async (_lease: JobLease, operation: (client: unknown) => Promise<number>) => (
+      operation({ externalSighting: { upsert } })
+    ));
+    const sightings = Array.from({ length: 201 }, (_, index) => ({
+      ...sighting,
+      externalId: `provider-${index}`,
+    }));
+
+    const summary = await runGbifIngestion({
+      fetchSightings: async () => sightings,
+      lease,
+      signal: new AbortController().signal,
+      store: { runFenced },
+    });
+
+    expect(summary).toEqual({ processed: 201, provider: 'gbif' });
+    expect(runFenced).toHaveBeenCalledTimes(2);
+    expect(upsert).toHaveBeenCalledTimes(201);
+  });
 });

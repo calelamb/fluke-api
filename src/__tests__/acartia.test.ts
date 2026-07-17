@@ -101,6 +101,19 @@ describe('normalizeAcartiaSighting', () => {
     expect(normalizeAcartiaSighting({ ...baseRaw, trusted: true })?.trusted).toBe(true);
     expect(normalizeAcartiaSighting({ ...baseRaw, trusted: false })?.trusted).toBe(false);
   });
+
+  it('rejects unsafe identities and strips unsafe provider URLs', () => {
+    expect(normalizeAcartiaSighting({ ...baseRaw, ssemmi_id: '' })).toBeNull();
+    expect(normalizeAcartiaSighting({ ...baseRaw, ssemmi_id: 'x'.repeat(201) })).toBeNull();
+    expect(normalizeAcartiaSighting({
+      ...baseRaw,
+      photo_url: 'javascript:alert(1)',
+    })?.sourceUrl).toBeNull();
+    expect(normalizeAcartiaSighting({
+      ...baseRaw,
+      photo_url: 'https://provider.example/photo.jpg',
+    })?.sourceUrl).toBe('https://provider.example/photo.jpg');
+  });
 });
 
 describe('fetchAcartiaCurrent', () => {

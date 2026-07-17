@@ -145,4 +145,23 @@ describe('runLockedJob', () => {
       event: 'FAILED',
     });
   });
+
+  it('rechecks lease ownership before recording success', async () => {
+    const store = new MemoryLeaseStore();
+
+    const result = await runLockedJob({
+      jobName: 'prediction-compute',
+      store,
+      work: async () => {
+        store.loseLease();
+        return { processed: 1 };
+      },
+    });
+
+    expect(result.exitCode).toBe(JOB_EXIT.LEASE_LOST);
+    expect(store.events.at(-1)).toMatchObject({
+      errorCode: 'LEASE_LOST',
+      event: 'LEASE_LOST',
+    });
+  });
 });

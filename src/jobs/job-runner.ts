@@ -130,6 +130,8 @@ export async function runLockedJob(
   try {
     const summary = await options.work(controller.signal, lease);
     if (controller.signal.aborted) throw controller.signal.reason;
+    const retained = await options.store.heartbeat(lease).catch(() => false);
+    if (!retained) throw new LeaseLostError();
     await options.store.append(eventFor(lease, 'SUCCEEDED', { summary }));
     return { exitCode: JOB_EXIT.SUCCESS, summary };
   } catch (error: unknown) {

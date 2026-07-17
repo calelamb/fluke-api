@@ -100,6 +100,18 @@ function isFiniteCoord(lat: number, lng: number): boolean {
   );
 }
 
+function safeHttpUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:'
+      ? parsed.toString()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Normalise a raw Acartia sighting into our internal shape.
  * Returns null if the sighting is malformed, not an orca, or out of range.
@@ -108,6 +120,8 @@ export function normalizeAcartiaSighting(
   raw: AcartiaSighting,
 ): NormalizedExternalSighting | null {
   if (!isOrca(raw.type)) return null;
+  const externalId = raw.ssemmi_id.trim();
+  if (externalId.length === 0 || externalId.length > 200) return null;
 
   const lat = toNumber(raw.latitude);
   const lng = toNumber(raw.longitude);
@@ -125,29 +139,30 @@ export function normalizeAcartiaSighting(
   const attributionParts = [raw.data_source_entity, raw.data_source_name].filter(
     (part): part is string => typeof part === 'string' && part.length > 0,
   );
-  const attribution =
+  const attribution = (
     attributionParts.length > 0
       ? Array.from(new Set(attributionParts)).join(' / ')
-      : 'Acartia (unknown source)';
+      : 'Acartia (unknown source)'
+  ).slice(0, 500);
 
   const trustedFlag = typeof raw.trusted === 'boolean' ? raw.trusted : raw.trusted === 1;
 
   const notes =
     raw.data_source_comments && raw.data_source_comments.length > 0
-      ? raw.data_source_comments
+      ? raw.data_source_comments.slice(0, 2_000)
       : null;
 
   return {
     source: 'acartia',
-    externalId: raw.ssemmi_id,
+    externalId,
     observedAt,
     latitude: lat,
     longitude: lng,
-    species: raw.type,
+    species: raw.type.slice(0, 200),
     ecotypeGuess: inferEcotype(raw.type, notes),
     groupSize,
     attribution,
-    sourceUrl: raw.photo_url && raw.photo_url.length > 0 ? raw.photo_url : null,
+    sourceUrl: safeHttpUrl(raw.photo_url),
     notes,
     trusted: trustedFlag,
   };
