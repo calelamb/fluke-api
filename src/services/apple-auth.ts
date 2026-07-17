@@ -1,5 +1,7 @@
 import {
   createRemoteJWKSet,
+  customFetch,
+  decodeProtectedHeader,
   importPKCS8,
   jwtVerify,
   SignJWT,
@@ -15,6 +17,9 @@ const APPLE_TOKEN_URL = `${APPLE_ISSUER}/auth/token`;
 const CLIENT_SECRET_LIFETIME_SECONDS = 180 * 24 * 60 * 60;
 const MAX_CREDENTIAL_LENGTH = 16_384;
 const MAX_FETCH_TIMEOUT_MS = 10_000;
+const MAX_JWKS_RESPONSE_BYTES = 128 * 1_024;
+const MAX_KEY_ID_LENGTH = 128;
+const MAX_TOKEN_RESPONSE_BYTES = 64 * 1_024;
 
 const tokenResponseSchema = z.object({
   access_token: z.string().min(1).max(MAX_CREDENTIAL_LENGTH),
@@ -69,11 +74,50 @@ export class AppleAuthError extends Error {
   }
 }
 
-function requireBoundedCredential(value: string): string {
-  if (value.length === 0 || value.length > MAX_CREDENTIAL_LENGTH || value.trim() !== value) {
+function requireBoundedCredential(value: unknown): string {
+  if (typeof value !== 'string'
+    || value.length === 0
+    || value.length > MAX_CREDENTIAL_LENGTH
+    || value.trim() !== value) {
     throw new AppleAuthError('APPLE_CREDENTIAL_INVALID');
   }
   return value;
+}
+
+async function readBoundedBytes(response: Response, maximumBytes: number): Promise<Uint8Array> {
+  const contentLength = response.headers.get('content-length');
+  if (contentLength !== null) {
+    const parsedLength = Number(contentLength);
+    if (!Number.isSafeInteger(parsedLength) || parsedLength < 0 || parsedLength > maximumBytes) {
+      throw new AppleAuthError('APPLE_UPSTREAM_UNAVAILABLE');
+    }
+  }
+
+  if (!response.body) {
+    return new Uint8Array();
+  }
+  const reader = response.body.getReader();
+  let collected = Buffer.alloc(0);
+  while (true) {
+    const result = await reader.read();
+    if (result.done) {
+      return collected;
+    }
+    if (collected.length + result.value.byteLength > maximumBytes) {
+      await reader.cancel();
+      throw new AppleAuthError('APPLE_UPSTREAM_UNAVAILABLE');
+    }
+    collected = Buffer.concat([collected, result.value]);
+  }
+}
+
+async function boundedResponse(response: Response, maximumBytes: number): Promise<Response> {
+  const bytes = await readBoundedBytes(response, maximumBytes);
+  return new Response(bytes, {
+    headers: response.headers,
+    status: response.status,
+    statusText: response.statusText,
+  });
 }
 
 function validateConfig(config: AppleAuthConfig): Required<AppleAuthConfig> {
@@ -113,6 +157,10 @@ export class AppleAuthService {
     this.#jwks = dependencies.jwks ?? createRemoteJWKSet(APPLE_JWKS_URL, {
       cacheMaxAge: 10 * 60_000,
       cooldownDuration: 30_000,
+      [customFetch]: async (url, options) => boundedResponse(await this.#fetch(url, {
+        ...options,
+        redirect: 'error',
+      }), MAX_JWKS_RESPONSE_BYTES),
       timeoutDuration: 5_000,
     });
     this.#now = dependencies.now ?? (() => new Date());
@@ -137,11 +185,9 @@ export class AppleAuthService {
     }
   }
 
-  public async exchangeAppleAuthorizationCode(code: string, expectedSubject?: string): Promise<AppleTokenSet> {
+  public async exchangeAppleAuthorizationCode(code: string, expectedSubject: string): Promise<AppleTokenSet> {
     requireBoundedCredential(code);
-    if (expectedSubject !== undefined) {
-      requireBoundedCredential(expectedSubject);
-    }
+    requireBoundedCredential(expectedSubject);
 
     const response = await this.#postForm(APPLE_TOKEN_URL, new URLSearchParams({
       client_id: this.#config.clientId,
@@ -151,7 +197,7 @@ export class AppleAuthService {
     }));
     const parsed = await this.#parseTokenResponse(response);
     const endpointIdentity = await this.#verifyEndpointIdentityToken(parsed.id_token);
-    if (expectedSubject !== undefined && endpointIdentity.subject !== expectedSubject) {
+    if (endpointIdentity.subject !== expectedSubject) {
       throw new AppleAuthError('APPLE_TOKEN_INVALID');
     }
 
@@ -175,12 +221,25 @@ export class AppleAuthService {
   }
 
   async #verifyToken(token: string): Promise<JWTPayload> {
+    const protectedHeader = decodeProtectedHeader(token);
+    if (typeof protectedHeader.kid !== 'string'
+      || protectedHeader.kid.length === 0
+      || protectedHeader.kid.length > MAX_KEY_ID_LENGTH
+      || protectedHeader.kid.trim() !== protectedHeader.kid) {
+      throw new AppleAuthError('APPLE_TOKEN_INVALID');
+    }
     const result = await jwtVerify(token, this.#jwks, {
       algorithms: ['RS256'],
       audience: this.#config.clientId,
       currentDate: this.#now(),
       issuer: APPLE_ISSUER,
     });
+    if (result.payload.aud !== this.#config.clientId
+      || typeof result.payload.exp !== 'number'
+      || !Number.isFinite(result.payload.exp)
+      || result.payload.exp <= 0) {
+      throw new AppleAuthError('APPLE_TOKEN_INVALID');
+    }
     return result.payload;
   }
 
@@ -218,6 +277,7 @@ export class AppleAuthService {
         body,
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
         method: 'POST',
+        redirect: 'error',
         signal: AbortSignal.timeout(this.#config.fetchTimeoutMs),
       });
       if (!response.ok) {
@@ -231,7 +291,8 @@ export class AppleAuthService {
 
   async #parseTokenResponse(response: Response): Promise<z.infer<typeof tokenResponseSchema>> {
     try {
-      return tokenResponseSchema.parse(await response.json());
+      const bytes = await readBoundedBytes(response, MAX_TOKEN_RESPONSE_BYTES);
+      return tokenResponseSchema.parse(JSON.parse(new TextDecoder().decode(bytes)) as unknown);
     } catch {
       throw new AppleAuthError('APPLE_UPSTREAM_UNAVAILABLE');
     }

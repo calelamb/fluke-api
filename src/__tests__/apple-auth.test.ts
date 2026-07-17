@@ -1,4 +1,4 @@
-import { decodeJwt, decodeProtectedHeader, exportJWK, exportPKCS8, generateKeyPair, SignJWT, type JWK } from 'jose';
+import { decodeJwt, decodeProtectedHeader, exportJWK, exportPKCS8, generateKeyPair, SignJWT, type JWK, type JWTPayload } from 'jose';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -35,21 +35,32 @@ function config(overrides: Partial<AppleAuthConfig> = {}): AppleAuthConfig {
 }
 
 async function identityToken(overrides: {
-  audience?: string;
+  audience?: string | readonly string[];
   expiresAt?: number;
   issuer?: string;
+  kid?: string;
   nonce?: string;
+  omitExpiration?: boolean;
   subject?: string;
+  stringExpiration?: boolean;
 } = {}): Promise<string> {
   const issuedAt = Math.floor(NOW.getTime() / 1_000);
-  return new SignJWT({ nonce: overrides.nonce ?? 'client-nonce' })
-    .setProtectedHeader({ alg: 'RS256', kid: 'apple-key' })
+  const payload: JWTPayload = overrides.stringExpiration
+    ? { nonce: overrides.nonce ?? 'client-nonce', exp: 'later' as unknown as number }
+    : { nonce: overrides.nonce ?? 'client-nonce' };
+  const audience = overrides.audience === undefined || typeof overrides.audience === 'string'
+    ? (overrides.audience ?? CLIENT_ID)
+    : [...overrides.audience];
+  let token = new SignJWT(payload)
+    .setProtectedHeader({ alg: 'RS256', kid: overrides.kid ?? 'apple-key' })
     .setIssuer(overrides.issuer ?? 'https://appleid.apple.com')
-    .setAudience(overrides.audience ?? CLIENT_ID)
+    .setAudience(audience)
     .setSubject(overrides.subject ?? SUBJECT)
-    .setIssuedAt(issuedAt)
-    .setExpirationTime(overrides.expiresAt ?? issuedAt + 300)
-    .sign(applePrivateKey);
+    .setIssuedAt(issuedAt);
+  if (!overrides.omitExpiration) {
+    token = token.setExpirationTime(overrides.expiresAt ?? issuedAt + 300);
+  }
+  return token.sign(applePrivateKey);
 }
 
 function jwksForAppleKey(): (protectedHeader: { kid?: string }) => Promise<JWK> {
@@ -80,6 +91,11 @@ describe('AppleAuthService identity verification', () => {
     ['wrong audience', { audience: 'app.other' }, 'client-nonce'],
     ['wrong issuer', { issuer: 'https://attacker.example' }, 'client-nonce'],
     ['expired token', { expiresAt: Math.floor(NOW.getTime() / 1_000) - 1 }, 'client-nonce'],
+    ['missing expiration', { omitExpiration: true }, 'client-nonce'],
+    ['non-numeric expiration', { omitExpiration: true, stringExpiration: true }, 'client-nonce'],
+    ['multiple audiences', { audience: [CLIENT_ID, 'app.attacker'] }, 'client-nonce'],
+    ['missing key id', { kid: '' }, 'client-nonce'],
+    ['oversized key id', { kid: 'k'.repeat(129) }, 'client-nonce'],
     ['blank subject', { subject: '' }, 'client-nonce'],
   ] as const)('rejects %s with a sanitized stable error', async (_label, overrides, expectedNonce) => {
     const token = await identityToken(overrides);
@@ -96,6 +112,29 @@ describe('AppleAuthService identity verification', () => {
   it('rejects an empty expected nonce before JWT verification', async () => {
     await expect(service().verifyAppleIdentityToken(await identityToken(), ''))
       .rejects.toMatchObject({ code: 'APPLE_TOKEN_INVALID' });
+  });
+
+  it.each(['', 'k'.repeat(129)])('rejects an invalid kid before invoking the key resolver', async (kid) => {
+    const jwks = vi.fn(jwksForAppleKey());
+    const localService = new AppleAuthService(config(), { jwks, now: () => NOW });
+    await expect(localService.verifyAppleIdentityToken(await identityToken({ kid }), 'client-nonce'))
+      .rejects.toMatchObject({ code: 'APPLE_TOKEN_INVALID' });
+    expect(jwks).not.toHaveBeenCalled();
+  });
+
+  it('bounds the remote JWKS response before jose parses it', async () => {
+    const oversizedJwks = JSON.stringify({ keys: [], padding: 'x'.repeat(140_000) });
+    const fetchMock = vi.fn<AppleFetch>(async () => new Response(oversizedJwks, { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const remoteService = new AppleAuthService(config(), { fetch: fetchMock, now: () => NOW });
+      await expect(remoteService.verifyAppleIdentityToken(await identityToken(), 'client-nonce'))
+        .rejects.toMatchObject({ code: 'APPLE_UPSTREAM_UNAVAILABLE' });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(String(fetchMock.mock.calls[0]?.[0])).toBe('https://appleid.apple.com/auth/keys');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
@@ -115,7 +154,7 @@ describe('AppleAuthService token endpoint', () => {
     expect(result).toMatchObject({ refreshToken: 'refresh-value', subject: SUBJECT });
     expect(fetchMock).toHaveBeenCalledWith(
       'https://appleid.apple.com/auth/token',
-      expect.objectContaining({ method: 'POST', signal: expect.any(AbortSignal) }),
+      expect.objectContaining({ method: 'POST', redirect: 'error', signal: expect.any(AbortSignal) }),
     );
     const body = String(fetchMock.mock.calls[0]?.[1]?.body);
     expect(body).toContain(`client_id=${CLIENT_ID}`);
@@ -137,6 +176,13 @@ describe('AppleAuthService token endpoint', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('requires a verified expected subject before exchanging a code', async () => {
+    const fetchMock = vi.fn<AppleFetch>();
+    await expect(service(fetchMock).exchangeAppleAuthorizationCode('code', undefined as never))
+      .rejects.toMatchObject({ code: 'APPLE_CREDENTIAL_INVALID' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('rejects when the token response identity does not match the verified subject', async () => {
     const endpointIdentityToken = await identityToken({ nonce: '', subject: 'different-user' });
     const fetchMock: AppleFetch = async () => new Response(JSON.stringify({
@@ -154,7 +200,7 @@ describe('AppleAuthService token endpoint', () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       'https://appleid.apple.com/auth/revoke',
-      expect.objectContaining({ method: 'POST', signal: expect.any(AbortSignal) }),
+      expect.objectContaining({ method: 'POST', redirect: 'error', signal: expect.any(AbortSignal) }),
     );
     const body = String(fetchMock.mock.calls[0]?.[1]?.body);
     expect(body).toContain('token=refresh-value');
@@ -179,5 +225,26 @@ describe('AppleAuthService token endpoint', () => {
         expect(String(error)).not.toContain('refresh-value');
       }
     }
+  });
+
+  it('sanitizes redirect failures from both fixed Apple endpoints', async () => {
+    const fetchFailure: AppleFetch = async () => {
+      throw new TypeError('redirect exposed single-use-code refresh-value');
+    };
+    const operations = [
+      () => service(fetchFailure).exchangeAppleAuthorizationCode('single-use-code', SUBJECT),
+      () => service(fetchFailure).revokeAppleRefreshToken('refresh-value'),
+    ];
+    for (const operation of operations) {
+      await expect(operation()).rejects.toMatchObject({ code: 'APPLE_UPSTREAM_UNAVAILABLE' });
+      await expect(operation()).rejects.not.toThrow(/single-use-code|refresh-value/u);
+    }
+  });
+
+  it('rejects oversized token endpoint bodies before parsing JSON', async () => {
+    const oversized = JSON.stringify({ padding: 'x'.repeat(70_000) });
+    const fetchMock: AppleFetch = async () => new Response(oversized, { status: 200 });
+    await expect(service(fetchMock).exchangeAppleAuthorizationCode('code', SUBJECT))
+      .rejects.toMatchObject({ code: 'APPLE_UPSTREAM_UNAVAILABLE' });
   });
 });

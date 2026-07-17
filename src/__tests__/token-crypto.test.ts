@@ -24,8 +24,8 @@ describe('TokenCrypto', () => {
     expect(Buffer.from(second.split('.')[1] ?? '', 'base64url')).toHaveLength(12);
   });
 
-  it('rejects an empty plaintext token', () => {
-    expect(() => new TokenCrypto(Buffer.alloc(32, 7)).encryptToken('')).toThrow(TokenCryptoError);
+  it.each(['', ' ', '\n\t'])('rejects an empty or whitespace-only plaintext token', (token) => {
+    expect(() => new TokenCrypto(Buffer.alloc(32, 7)).encryptToken(token)).toThrow(TokenCryptoError);
   });
 
   it.each([
@@ -61,12 +61,27 @@ describe('TokenCrypto', () => {
     }
   });
 
-  it('decodes only canonical base64url keys containing exactly 32 bytes', () => {
-    const encoded = Buffer.alloc(32, 3).toString('base64url');
-    expect(decodeTokenEncryptionKey(encoded)).toEqual(Buffer.alloc(32, 3));
+  it('decodes canonical padded standard base64 emitted by openssl rand -base64 32', () => {
+    const raw = Buffer.alloc(32, 251);
+    const opensslFormat = raw.toString('base64');
+    expect(opensslFormat).toContain('+');
+    expect(opensslFormat.endsWith('=')).toBe(true);
+    expect(decodeTokenEncryptionKey(opensslFormat)).toEqual(raw);
+  });
 
-    for (const invalid of ['', Buffer.alloc(31).toString('base64url'), `${encoded}=`, 'not base64url!']) {
-      expect(() => decodeTokenEncryptionKey(invalid)).toThrow(TokenCryptoError);
+  it('rejects malformed, noncanonical, URL-safe, unpadded, and wrong-length key encodings', () => {
+    const canonical = Buffer.alloc(32, 251).toString('base64');
+    const invalid = [
+      '',
+      Buffer.alloc(31).toString('base64'),
+      canonical.replace(/=$/u, ''),
+      Buffer.alloc(32, 251).toString('base64url'),
+      ` ${canonical}`,
+      `${canonical}\n`,
+      'not base64!',
+    ];
+    for (const encoded of invalid) {
+      expect(() => decodeTokenEncryptionKey(encoded)).toThrow(TokenCryptoError);
     }
   });
 });

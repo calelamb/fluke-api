@@ -306,7 +306,7 @@ git commit -m "feat: add observer ownership schema"
 - Create: `src/__tests__/token-crypto.test.ts`
 
 **Interfaces:**
-- Produces: `AppleAuthService(config, dependencies)`, `verifyAppleIdentityToken(token, expectedNonce)`, `exchangeAppleAuthorizationCode(code)`, `revokeAppleRefreshToken(refreshToken)`, `TokenCrypto(encryptionKey)`, `encryptToken(token)`, `decryptToken(ciphertext)`.
+- Produces: `AppleAuthService(config, dependencies)`, `verifyAppleIdentityToken(token, expectedNonce)`, `exchangeAppleAuthorizationCode(code, expectedSubject)`, `revokeAppleRefreshToken(refreshToken)`, `TokenCrypto(encryptionKey)`, `encryptToken(token)`, `decryptToken(ciphertext)`.
 - Consumes: constructor-injected `AppleAuthConfig` and decoded 32-byte encryption key; Task 8 validates host values and composes these objects in `src/app.ts`.
 
 - [ ] **Step 1: Add dependencies and failing verifier tests**
@@ -322,7 +322,7 @@ it('rejects a token whose nonce does not match the client nonce', async () => {
 });
 
 it('exchanges a code using the exact native client id', async () => {
-  await service.exchangeAppleAuthorizationCode('single-use-code');
+  await service.exchangeAppleAuthorizationCode('single-use-code', 'verified-apple-subject');
   expect(fetchMock).toHaveBeenCalledWith(
     'https://appleid.apple.com/auth/token',
     expect.objectContaining({ method: 'POST', signal: expect.any(AbortSignal) }),
@@ -358,7 +358,7 @@ Generate the ES256 Apple client-secret JWT with issuer `APPLE_TEAM_ID`, subject 
 
 - [ ] **Step 4: Implement AES-256-GCM token encryption**
 
-Decode exactly 32 bytes from `APPLE_TOKEN_ENCRYPTION_KEY`; generate a random 12-byte IV; authenticate version byte `1`; serialize `version.iv.tag.ciphertext` as base64url components. Decryption rejects unknown version, malformed encoding, wrong tag, and wrong key.
+Decode exactly 32 bytes from strict canonical padded standard base64 in `APPLE_TOKEN_ENCRYPTION_KEY` (matching `openssl rand -base64 32`); generate a random 12-byte IV; authenticate version byte `1`; serialize `version.iv.tag.ciphertext` as base64url components. Decryption rejects unknown version, malformed encoding, wrong tag, and wrong key.
 
 - [ ] **Step 5: Run focused tests**
 

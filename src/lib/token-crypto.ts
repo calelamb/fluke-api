@@ -7,6 +7,7 @@ const IV_BYTES = 12;
 const TOKEN_VERSION = '1';
 const TOKEN_VERSION_AAD = Buffer.from([1]);
 const BASE64URL = /^[A-Za-z0-9_-]+$/u;
+const STANDARD_BASE64 = /^[A-Za-z0-9+/]+={1,2}$/u;
 
 export class TokenCryptoError extends Error {
   public readonly code = 'TOKEN_CRYPTO_INVALID';
@@ -31,7 +32,14 @@ function decodeComponent(value: string, expectedBytes?: number): Buffer {
 }
 
 export function decodeTokenEncryptionKey(encodedKey: string): Buffer {
-  return decodeComponent(encodedKey, ENCRYPTION_KEY_BYTES);
+  if (!STANDARD_BASE64.test(encodedKey) || encodedKey.length % 4 !== 0) {
+    throw new TokenCryptoError();
+  }
+  const decoded = Buffer.from(encodedKey, 'base64');
+  if (decoded.length !== ENCRYPTION_KEY_BYTES || decoded.toString('base64') !== encodedKey) {
+    throw new TokenCryptoError();
+  }
+  return decoded;
 }
 
 export class TokenCrypto {
@@ -45,7 +53,7 @@ export class TokenCrypto {
   }
 
   public encryptToken(token: string): string {
-    if (token.length === 0) {
+    if (token.trim().length === 0) {
       throw new TokenCryptoError();
     }
 
