@@ -50,6 +50,9 @@ importers:
       ipaddr.js:
         specifier: 2.4.0
         version: 2.4.0
+      prisma:
+        specifier: 5.22.0
+        version: 5.22.0
       sharp:
         specifier: 0.34.5
         version: 0.34.5
@@ -75,9 +78,6 @@ importers:
       pino-pretty:
         specifier: 13.0.0
         version: 13.0.0
-      prisma:
-        specifier: 5.22.0
-        version: 5.22.0
       tsx:
         specifier: 4.23.1
         version: 4.23.1

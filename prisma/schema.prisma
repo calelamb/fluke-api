@@ -65,6 +65,14 @@ enum EmbeddingStatus {
   FAILED
 }
 
+enum JobRunEventType {
+  STARTED
+  SUCCEEDED
+  FAILED
+  SKIPPED_LOCKED
+  LEASE_LOST
+}
+
 model Whale {
   id                    String          @id @default(uuid())
   catalogId             String          @unique @map("catalog_id")
@@ -266,4 +274,31 @@ model PredictionGrid {
 
   @@unique([subjectKind, subjectId, horizonHours])
   @@map("prediction_grids")
+}
+
+model JobLease {
+  jobName        String   @id @map("job_name")
+  runId          String   @map("run_id")
+  ownerToken     String   @map("owner_token")
+  fence          BigInt
+  acquiredAt     DateTime @map("acquired_at")
+  heartbeatAt    DateTime @map("heartbeat_at")
+  leaseExpiresAt DateTime @map("lease_expires_at")
+
+  @@map("job_leases")
+}
+
+model JobRunEvent {
+  id         String          @id @default(uuid())
+  runId      String          @map("run_id")
+  jobName    String          @map("job_name")
+  event      JobRunEventType
+  fence      BigInt
+  occurredAt DateTime        @default(now()) @map("occurred_at")
+  summary    Json?
+  errorCode  String?         @map("error_code")
+
+  @@unique([runId, event])
+  @@index([jobName, occurredAt(sort: Desc)])
+  @@map("job_run_events")
 }

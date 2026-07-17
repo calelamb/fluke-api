@@ -18,6 +18,7 @@ import {
   type FeatureConfig,
 } from './features.js';
 import { boundedDatabaseRead } from './lib/bounded-database-read.js';
+import { assertRequiredMigration } from './ops/migration-readiness.js';
 import { resolveUploadsDir } from './lib/storage.js';
 import { resolveRequestId } from './lib/request-id.js';
 import { classifyError, classifyStatus } from './lib/safe-errors.js';
@@ -75,7 +76,10 @@ function isCanonicalSerializedError(payload: unknown, requestId: string): boolea
 async function defaultReadinessProbe(): Promise<void> {
   await boundedDatabaseRead(
     prisma,
-    (transaction) => transaction.$queryRaw`SELECT 1`,
+    async (transaction) => {
+      await transaction.$queryRaw`SELECT 1`;
+      await assertRequiredMigration(transaction);
+    },
     AbortSignal.timeout(READINESS_TIMEOUT_MS),
     READINESS_TIMEOUT_MS,
   );

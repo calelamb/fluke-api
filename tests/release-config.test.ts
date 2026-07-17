@@ -47,6 +47,34 @@ describe('release configuration', () => {
     expect(dockerfile).toContain('RUN mkdir -p /app/uploads && chown node:node /app/uploads');
   });
 
+  it('runs production migrations before Railway starts the API image', () => {
+    const railwayConfig = JSON.parse(readRepositoryFile('railway.json')) as {
+      deploy?: { preDeployCommand?: string[] };
+    };
+    const packageJson = JSON.parse(readRepositoryFile('package.json')) as {
+      dependencies?: Record<string, string>;
+    };
+
+    expect(railwayConfig.deploy?.preDeployCommand).toEqual([
+      'npm run db:migrate:deploy',
+    ]);
+    expect(packageJson.dependencies?.prisma).toBe('5.22.0');
+  });
+
+  it('keeps the required migration marker aligned with the latest migration', () => {
+    const readiness = readRepositoryFile('src/ops/migration-readiness.ts');
+    const migration = readRepositoryFile(
+      'prisma/migrations/20260716220000_add_job_operations/migration.sql',
+    );
+
+    expect(readiness).toContain(
+      "export const REQUIRED_MIGRATION = '20260716220000_add_job_operations'",
+    );
+    expect(migration).toContain('CREATE TABLE "job_leases"');
+    expect(migration).toContain('CREATE TABLE "job_run_events"');
+    expect(migration).toContain('job_run_events_are_append_only');
+  });
+
   it('uses an OpenSSL-equipped base for Prisma generation and runtime', () => {
     const dockerfile = readRepositoryFile('Dockerfile');
 
