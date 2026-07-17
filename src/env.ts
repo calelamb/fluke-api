@@ -1,5 +1,6 @@
 import ipaddr from 'ipaddr.js';
 import { z } from 'zod';
+import { objectStorageEndpointIssue } from './lib/storage-endpoint.js';
 
 const DEVELOPMENT_WEB_ORIGINS = 'http://localhost:5174,http://localhost:5173';
 const DEVELOPMENT_API_ORIGIN = 'http://localhost:4000';
@@ -72,16 +73,24 @@ const envSchema = z
       .optional(),
   })
   .superRefine((value, ctx) => {
+    const storageKeys = [
+      'OBJECT_STORAGE_BUCKET',
+      'OBJECT_STORAGE_REGION',
+      'OBJECT_STORAGE_ENDPOINT',
+      'OBJECT_STORAGE_ACCESS_KEY_ID',
+      'OBJECT_STORAGE_SECRET_ACCESS_KEY',
+      'OBJECT_STORAGE_FORCE_PATH_STYLE',
+    ] as const;
+    const configuredStorageValues = storageKeys.filter((key) => value[key] !== undefined);
+    if (configuredStorageValues.length > 0 && configuredStorageValues.length < storageKeys.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['OBJECT_STORAGE'],
+        message: 'OBJECT_STORAGE_* values must be configured all-or-none',
+      });
+    }
     if (value.STORAGE_BACKEND === 's3') {
-      const required = [
-        'OBJECT_STORAGE_BUCKET',
-        'OBJECT_STORAGE_REGION',
-        'OBJECT_STORAGE_ENDPOINT',
-        'OBJECT_STORAGE_ACCESS_KEY_ID',
-        'OBJECT_STORAGE_SECRET_ACCESS_KEY',
-        'OBJECT_STORAGE_FORCE_PATH_STYLE',
-      ] as const;
-      for (const key of required) {
+      for (const key of storageKeys) {
         if (value[key] === undefined) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
@@ -91,7 +100,7 @@ const envSchema = z
         }
       }
       if (value.OBJECT_STORAGE_ENDPOINT) {
-        const issue = productionOriginIssue(value.OBJECT_STORAGE_ENDPOINT);
+        const issue = objectStorageEndpointIssue(value.OBJECT_STORAGE_ENDPOINT);
         if (issue) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
@@ -158,6 +167,9 @@ function productionIssues(input: NodeJS.ProcessEnv, parsed: Env): readonly strin
   }
 
   const issues: string[] = [];
+  if (parsed.STORAGE_BACKEND !== 's3') {
+    issues.push('STORAGE_BACKEND: production requires private S3-compatible storage');
+  }
   if (!input.WEB_ORIGIN) {
     issues.push('WEB_ORIGIN: is required explicitly in production');
   } else {

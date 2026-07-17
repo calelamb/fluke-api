@@ -90,6 +90,13 @@ jobs:
             -e WEB_ORIGIN=https://web.ci.invalid \
             -e API_PUBLIC_ORIGIN=https://api.ci.invalid \
             -e IDENTIFIER_SERVICE_URL \
+            -e STORAGE_BACKEND=s3 \
+            -e OBJECT_STORAGE_ACCESS_KEY_ID=ci-access-key \
+            -e OBJECT_STORAGE_BUCKET=fluke-ci-private \
+            -e OBJECT_STORAGE_ENDPOINT=https://objects.ci.invalid \
+            -e OBJECT_STORAGE_FORCE_PATH_STYLE=true \
+            -e OBJECT_STORAGE_REGION=us-west-2 \
+            -e OBJECT_STORAGE_SECRET_ACCESS_KEY=ci-secret-key \
             fluke-api:ci
           cleanup() {
             exit_code=$?

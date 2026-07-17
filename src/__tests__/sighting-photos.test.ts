@@ -288,6 +288,30 @@ describe('POST /api/v1/sightings/:id/photos', () => {
   });
 
   describe('admin upload', () => {
+    it('never treats a photo-upload JWT in the admin cookie as admin authorization', async () => {
+      vi.mocked(prisma.sighting.findUnique).mockResolvedValue({
+        id: 's1',
+        status: 'APPROVED',
+        createdAt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000),
+      } as never);
+      const photoUploadToken = app.jwt.sign(
+        { sightingId: 's1', type: 'photo-upload' },
+        { expiresIn: '24h' },
+      );
+      const form = new FormData();
+      form.append('file', await buildPng(), { filename: 'orca.png', contentType: 'image/png' });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/sightings/s1/photos',
+        payload: form,
+        headers: { ...form.getHeaders(), cookie: `fluke_admin=${photoUploadToken}` },
+      });
+
+      expect(response.statusCode).toBe(403);
+      expect(prisma.sightingPhoto.create).not.toHaveBeenCalled();
+    });
+
     it('accepts a photo with no time window or status restriction', async () => {
       vi.mocked(prisma.sighting.findUnique).mockResolvedValue({
         id: 's1',

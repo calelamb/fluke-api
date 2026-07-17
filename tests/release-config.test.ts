@@ -127,15 +127,29 @@ describe('release configuration', () => {
   it('keeps the required migration marker aligned with the latest migration', () => {
     const readiness = readRepositoryFile('src/ops/migration-readiness.ts');
     const migration = readRepositoryFile(
-      'prisma/migrations/20260717170000_add_observer_submissions/migration.sql',
+      'prisma/migrations/20260717183000_bound_sighting_photo_order/migration.sql',
     );
 
     expect(readiness).toContain(
-      "export const REQUIRED_MIGRATION = '20260717170000_add_observer_submissions'",
+      "export const REQUIRED_MIGRATION = '20260717183000_bound_sighting_photo_order'",
     );
-    expect(migration).toContain(`ALTER TYPE "UserRole" ADD VALUE 'OBSERVER'`);
-    expect(migration).toContain('CREATE TABLE "submission_idempotencies"');
-    expect(migration).toContain('ADD COLUMN     "observer_user_id" TEXT');
+    expect(migration).toContain('CHECK ("order_index" BETWEEN 0 AND 4)');
+    expect(migration).toContain('sighting_photos_sighting_id_order_index_key');
+  });
+
+  it('provides an all-or-none private storage fixture to the production container smoke', () => {
+    const workflow = readRepositoryFile('.github/workflows/ci.yml');
+    for (const value of [
+      'STORAGE_BACKEND=s3',
+      'OBJECT_STORAGE_ACCESS_KEY_ID=ci-access-key',
+      'OBJECT_STORAGE_BUCKET=fluke-ci-private',
+      'OBJECT_STORAGE_ENDPOINT=https://objects.ci.invalid',
+      'OBJECT_STORAGE_FORCE_PATH_STYLE=true',
+      'OBJECT_STORAGE_REGION=us-west-2',
+      'OBJECT_STORAGE_SECRET_ACCESS_KEY=ci-secret-key',
+    ]) {
+      expect(workflow).toContain(`-e ${value}`);
+    }
   });
 
   it('uses an OpenSSL-equipped base for Prisma generation and runtime', () => {

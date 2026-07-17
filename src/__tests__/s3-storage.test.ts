@@ -10,7 +10,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const getSignedUrl = vi.fn();
 vi.mock('@aws-sdk/s3-request-presigner', () => ({ getSignedUrl }));
 
-const { S3StorageBackend, parseS3StorageConfig } = await import('../lib/s3-storage.js');
+const {
+  S3StorageBackend,
+  StorageUnavailableError,
+  assertPublicEndpointResolution,
+  createPinnedLookup,
+  parseS3StorageConfig,
+} = await import('../lib/s3-storage.js');
 
 const CONFIG = Object.freeze({
   accessKeyId: 'access-key-id',
@@ -116,6 +122,47 @@ describe('S3StorageBackend', () => {
     })).rejects.toThrow(/key/i);
     expect(send).not.toHaveBeenCalled();
   });
+
+  it.each(['put', 'delete'] as const)('redacts raw SDK %s failures as retryable 503 errors', async (operation) => {
+    const raw = Object.assign(new Error(
+      'AWS failure Authorization=secret-access-key sightings/s-1/private.webp',
+    ), {
+      $metadata: { httpHeaders: { authorization: 'secret-access-key' }, httpStatusCode: 500 },
+    });
+    const { storage } = buildStorage(vi.fn().mockRejectedValue(raw));
+    const promise = operation === 'put'
+      ? storage.put({
+        body: Buffer.from('image'),
+        contentType: 'image/webp',
+        filename: 'private.webp',
+        prefix: 'sightings/s-1',
+      })
+      : storage.remove('sightings/s-1/private.webp');
+
+    const error = await promise.catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(StorageUnavailableError);
+    expect(error).toMatchObject({
+      failureKind: 'object-storage',
+      operation,
+      retryable: true,
+      statusCode: 503,
+    });
+    const serialized = JSON.stringify(error) + String((error as Error).stack);
+    expect(serialized).not.toContain('secret-access-key');
+    expect(serialized).not.toContain('private.webp');
+    expect(serialized).not.toContain('Authorization');
+  });
+
+  it('redacts raw presigner failures as retryable 503 errors', async () => {
+    getSignedUrl.mockRejectedValue(new Error('secret-access-key private.webp'));
+    const { storage } = buildStorage();
+    const error = await storage.signedReadUrl('sightings/s-1/private.webp')
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(StorageUnavailableError);
+    expect(error).toMatchObject({ operation: 'presign', statusCode: 503 });
+    expect(String((error as Error).stack)).not.toContain('secret-access-key');
+    expect(String((error as Error).stack)).not.toContain('private.webp');
+  });
 });
 
 describe('parseS3StorageConfig', () => {
@@ -138,5 +185,59 @@ describe('parseS3StorageConfig', () => {
     expect(() => parseS3StorageConfig({ ...CONFIG, bucket: '..' })).toThrow(/bucket/i);
     expect(() => parseS3StorageConfig({ ...CONFIG, region: 'bad region' })).toThrow(/region/i);
     expect(() => parseS3StorageConfig({ ...CONFIG, secretAccessKey: '' })).toThrow(/secretAccessKey/i);
+  });
+});
+
+describe('S3 endpoint DNS pinning', () => {
+  const publicAddress = Object.freeze({ address: '8.8.8.8', family: 4 as const });
+
+  it('pins each connection to a resolver-vetted public address', async () => {
+    const resolver = vi.fn().mockResolvedValue([publicAddress]);
+    const lookup = createPinnedLookup(resolver);
+    const result = await new Promise<{ address: string; family: number }>((resolve, reject) => {
+      lookup('objects.example.com', {}, (error, address, family) => {
+        if (error) reject(error);
+        else resolve({ address: address as string, family: family as number });
+      });
+    });
+    expect(result).toEqual(publicAddress);
+    expect(resolver).toHaveBeenCalledWith('objects.example.com');
+  });
+
+  it.each([
+    ['IPv4 loopback', '127.0.0.1'],
+    ['IPv4 private', '10.0.0.2'],
+    ['IPv4 link-local', '169.254.20.1'],
+    ['IPv4 multicast', '224.0.0.1'],
+    ['IPv4 reserved', '240.0.0.1'],
+    ['IPv6 loopback', '::1'],
+    ['IPv6 private', 'fd00::1'],
+    ['IPv6 link-local', 'fe80::1'],
+    ['IPv6 multicast', 'ff02::1'],
+  ])('rejects a hostname resolving to %s', async (_name, address) => {
+    const family = address.includes(':') ? 6 as const : 4 as const;
+    await expect(assertPublicEndpointResolution(
+      'https://objects.example.com',
+      vi.fn().mockResolvedValue([{ address, family }]),
+    )).rejects.toThrow(/public/i);
+  });
+
+  it('rejects mixed public and private DNS answers', async () => {
+    await expect(assertPublicEndpointResolution(
+      'https://objects.example.com',
+      vi.fn().mockResolvedValue([
+        publicAddress,
+        { address: '192.168.1.10', family: 4 },
+      ]),
+    )).rejects.toThrow(/public/i);
+  });
+
+  it('revalidates every connection so a rebinding answer is rejected', async () => {
+    const resolver = vi.fn()
+      .mockResolvedValueOnce([publicAddress])
+      .mockResolvedValueOnce([{ address: '127.0.0.1', family: 4 }]);
+    await expect(assertPublicEndpointResolution(CONFIG.endpoint, resolver)).resolves.toBeUndefined();
+    await expect(assertPublicEndpointResolution(CONFIG.endpoint, resolver)).rejects.toThrow(/public/i);
+    expect(resolver).toHaveBeenCalledTimes(2);
   });
 });

@@ -5,7 +5,12 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { NodeHttpHandler } from '@smithy/node-http-handler';
 import ipaddr from 'ipaddr.js';
+import type { LookupAddress } from 'node:dns';
+import { lookup as dnsLookup } from 'node:dns/promises';
+import { Agent } from 'node:https';
+import type { LookupFunction } from 'node:net';
 import type { Readable } from 'node:stream';
 import { z } from 'zod';
 import {
@@ -15,20 +20,34 @@ import {
   type StorageBackend,
   type StoredObject,
 } from './storage.js';
+import { objectStorageEndpointIssue } from './storage-endpoint.js';
 
 const MAX_OBJECT_BYTES = 10 * 1024 * 1024;
 const SIGNED_READ_SECONDS = 5 * 60;
 const ALLOWED_CONTENT_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
-const BLOCKED_IP_RANGES = new Set([
-  'broadcast',
-  'carrierGradeNat',
-  'linkLocal',
-  'loopback',
-  'private',
-  'reserved',
-  'uniqueLocal',
-  'unspecified',
-]);
+export type EndpointResolver = (hostname: string) => Promise<readonly LookupAddress[]>;
+export type StorageOperation = 'delete' | 'presign' | 'put';
+
+export class StorageUnavailableError extends Error {
+  readonly failureKind = 'object-storage';
+  readonly retryable = true;
+  readonly statusCode = 503;
+
+  constructor(readonly operation: StorageOperation) {
+    super('Private object storage is temporarily unavailable');
+    this.name = 'StorageUnavailableError';
+  }
+}
+
+interface PinnedLookupOptions {
+  readonly all?: boolean;
+}
+
+type PinnedLookupCallback = (
+  error: NodeJS.ErrnoException | null,
+  address: string | readonly LookupAddress[],
+  family?: number,
+) => void;
 
 const s3StorageConfigSchema = z.object({
   accessKeyId: z.string().min(1).max(256),
@@ -38,7 +57,7 @@ const s3StorageConfigSchema = z.object({
   region: z.string().min(1).max(64).regex(/^[a-z0-9-]+$/u),
   secretAccessKey: z.string().min(1).max(1_024),
 }).strict().superRefine((value, context) => {
-  const issue = endpointIssue(value.endpoint);
+  const issue = objectStorageEndpointIssue(value.endpoint);
   if (issue !== null) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: issue, path: ['endpoint'] });
   }
@@ -46,21 +65,41 @@ const s3StorageConfigSchema = z.object({
 
 export type S3StorageConfig = Readonly<z.infer<typeof s3StorageConfigSchema>>;
 
-function endpointIssue(endpoint: string): string | null {
-  const parsed = new URL(endpoint);
-  const hostname = parsed.hostname.replace(/^\[|\]$/gu, '').toLowerCase();
-  if (parsed.protocol !== 'https:') return 'endpoint must use HTTPS';
-  if (parsed.username || parsed.password) return 'endpoint must not contain credentials';
-  if (parsed.pathname !== '/' || parsed.search || parsed.hash) {
-    return 'endpoint must not contain a path, query, or fragment';
+function assertPublicAddresses(addresses: readonly LookupAddress[]): void {
+  if (addresses.length === 0) throw new Error('Object storage endpoint DNS returned no addresses');
+  for (const { address } of addresses) {
+    if (!ipaddr.isValid(address) || ipaddr.process(address).range() !== 'unicast') {
+      throw new Error('Object storage endpoint DNS must resolve only to public addresses');
+    }
   }
-  if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local')) {
-    return 'endpoint must not use a local hostname';
-  }
-  if (ipaddr.isValid(hostname) && BLOCKED_IP_RANGES.has(ipaddr.process(hostname).range())) {
-    return 'endpoint must not use a private, local, or reserved address';
-  }
-  return null;
+}
+
+async function defaultEndpointResolver(hostname: string): Promise<readonly LookupAddress[]> {
+  return dnsLookup(hostname, { all: true, verbatim: true });
+}
+
+export async function assertPublicEndpointResolution(
+  endpoint: string,
+  resolver: EndpointResolver = defaultEndpointResolver,
+): Promise<void> {
+  const hostname = new URL(endpoint).hostname.replace(/^\[|\]$/gu, '');
+  assertPublicAddresses(await resolver(hostname));
+}
+
+export function createPinnedLookup(
+  resolver: EndpointResolver = defaultEndpointResolver,
+): (hostname: string, options: PinnedLookupOptions, callback: PinnedLookupCallback) => void {
+  return (hostname, options, callback): void => {
+    void resolver(hostname).then((addresses) => {
+      assertPublicAddresses(addresses);
+      if (options.all) callback(null, addresses);
+      else callback(null, addresses[0]!.address, addresses[0]!.family);
+    }).catch((_error: unknown) => {
+      const safeError = new Error('Object storage endpoint DNS validation failed');
+      safeError.name = 'StorageEndpointError';
+      callback(safeError, '', 0);
+    });
+  };
 }
 
 export function parseS3StorageConfig(input: unknown): S3StorageConfig {
@@ -110,6 +149,12 @@ export class S3StorageBackend implements StorageBackend {
       endpoint: this.#config.endpoint,
       forcePathStyle: this.#config.forcePathStyle,
       region: this.#config.region,
+      requestHandler: new NodeHttpHandler({
+        httpsAgent: new Agent({
+          keepAlive: true,
+          lookup: createPinnedLookup() as LookupFunction,
+        }),
+      }),
     });
   }
 
@@ -126,13 +171,17 @@ export class S3StorageBackend implements StorageBackend {
     }
     const body = await boundedBody(input.body);
     const key = sanitizeStorageKey(`${prefix}/${filename}`);
-    await this.#client.send(new PutObjectCommand({
-      Body: body,
-      Bucket: this.#config.bucket,
-      ContentLength: body.byteLength,
-      ContentType: input.contentType,
-      Key: key,
-    }));
+    try {
+      await this.#client.send(new PutObjectCommand({
+        Body: body,
+        Bucket: this.#config.bucket,
+        ContentLength: body.byteLength,
+        ContentType: input.contentType,
+        Key: key,
+      }));
+    } catch {
+      throw new StorageUnavailableError('put');
+    }
     return Object.freeze({ key, size: body.byteLength });
   }
 
@@ -144,7 +193,7 @@ export class S3StorageBackend implements StorageBackend {
         Key: safeKey,
       }));
     } catch (error: unknown) {
-      if (!isMissingObject(error)) throw error;
+      if (!isMissingObject(error)) throw new StorageUnavailableError('delete');
     }
   }
 
@@ -157,6 +206,10 @@ export class S3StorageBackend implements StorageBackend {
       Bucket: this.#config.bucket,
       Key: sanitizeStorageKey(key),
     });
-    return getSignedUrl(this.#client, command, { expiresIn: SIGNED_READ_SECONDS });
+    try {
+      return await getSignedUrl(this.#client, command, { expiresIn: SIGNED_READ_SECONDS });
+    } catch {
+      throw new StorageUnavailableError('presign');
+    }
   }
 }

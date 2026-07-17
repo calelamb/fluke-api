@@ -1,4 +1,4 @@
-export const REQUIRED_MIGRATION = '20260717170000_add_observer_submissions' as const;
+export const REQUIRED_MIGRATION = '20260717183000_bound_sighting_photo_order' as const;
 
 interface MigrationStatusRow {
   readonly requiredApplied: boolean;

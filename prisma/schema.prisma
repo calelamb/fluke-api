@@ -144,6 +144,7 @@ model SightingPhoto {
   createdAt    DateTime          @default(now()) @map("created_at")
 
   @@index([done])
+  @@unique([sightingId, orderIndex], map: "sighting_photos_sighting_id_order_index_key")
   @@map("sighting_photos")
 }
 

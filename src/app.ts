@@ -24,6 +24,10 @@ import type { StorageBackend } from './lib/storage.js';
 import type { TokenCrypto } from './lib/token-crypto.js';
 import { resolveRequestId } from './lib/request-id.js';
 import { classifyError, classifyStatus } from './lib/safe-errors.js';
+import {
+  assertPublicEndpointResolution,
+  type EndpointResolver,
+} from './lib/s3-storage.js';
 import adminRoutes from './routes/admin.js';
 import authRoutes from './routes/auth.js';
 import observerAuthRoutes from './routes/observer-auth.js';
@@ -54,6 +58,7 @@ export interface BuildAppOptions {
   readonly publicReadTimeoutMs?: number;
   readonly readinessProbe?: ReadinessProbe;
   readonly observerAuth?: ObserverAuthDependencies;
+  readonly storageEndpointResolver?: EndpointResolver;
   readonly silent?: boolean;
   readonly trustProxy?: false | 1;
 }
@@ -61,6 +66,40 @@ export interface BuildAppOptions {
 const READINESS_TIMEOUT_MS = 5_000;
 const PUBLIC_READ_RATE_LIMIT_MAX = 120;
 const PUBLIC_READ_TIMEOUT_MS = 5_000;
+const STORAGE_OPERATIONS = new Set(['delete', 'presign', 'put']);
+
+interface ErrorDiagnosticContext {
+  readonly kind: string;
+  readonly requestId: string;
+  readonly statusCode: number;
+}
+
+export function safeErrorDiagnostics(
+  error: unknown,
+  context: ErrorDiagnosticContext,
+): Readonly<Record<string, unknown>> {
+  if (typeof error === 'object' && error !== null) {
+    const candidate = error as { readonly failureKind?: unknown; readonly operation?: unknown };
+    if (
+      candidate.failureKind === 'object-storage'
+      && typeof candidate.operation === 'string'
+      && STORAGE_OPERATIONS.has(candidate.operation)
+    ) {
+      return Object.freeze({
+        failureKind: 'object-storage',
+        operation: candidate.operation,
+        requestId: context.requestId,
+        statusCode: context.statusCode,
+      });
+    }
+  }
+  return Object.freeze({
+    err: error,
+    failureKind: context.kind,
+    requestId: context.requestId,
+    statusCode: context.statusCode,
+  });
+}
 
 function positiveInteger(value: number, name: string): number {
   if (!Number.isInteger(value) || value <= 0) {
@@ -120,11 +159,21 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     ),
     readinessProbe: options.readinessProbe ?? defaultReadinessProbe,
     observerAuth: options.observerAuth,
+    storageEndpointResolver: options.storageEndpointResolver,
     silent: options.silent ?? false,
     // Production is bound to exactly one trusted reverse-proxy hop. Never
     // trust an arbitrary X-Forwarded-For chain.
     trustProxy: resolveTrustProxy(options.trustProxy),
   });
+  const requiresObjectStorage = resolvedOptions.features.accounts
+    || resolvedOptions.features.identification
+    || resolvedOptions.features.submissions;
+  if (requiresObjectStorage && env.STORAGE_BACKEND === 's3') {
+    await assertPublicEndpointResolution(
+      env.OBJECT_STORAGE_ENDPOINT!,
+      resolvedOptions.storageEndpointResolver,
+    );
+  }
   const app = Fastify({
     forceCloseConnections: 'idle',
     genReqId: (request) => resolveRequestId(request.headers['x-request-id']),
@@ -210,12 +259,11 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   });
   app.setErrorHandler(async (error, request, reply) => {
     const failure = classifyError(error, request.id);
-    const diagnostics = {
-      err: error,
-      failureKind: failure.kind,
+    const diagnostics = safeErrorDiagnostics(error, {
+      kind: failure.kind,
       requestId: request.id,
       statusCode: failure.statusCode,
-    };
+    });
     if (failure.statusCode >= 500) {
       request.log.error(diagnostics, 'request failed');
     } else {

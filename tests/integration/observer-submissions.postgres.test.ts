@@ -138,6 +138,20 @@ async function readLegacyRows(databaseUrl: string): Promise<{
 }
 
 describe('observer submissions schema', () => {
+  it('constrains each sighting to five uniquely ordered photo slots', () => {
+    const schema = readRepositoryFile('prisma/schema.prisma');
+    const migration = readRepositoryFile(
+      'prisma/migrations/20260717183000_bound_sighting_photo_order/migration.sql',
+    );
+
+    expect(schema).toContain('@@unique([sightingId, orderIndex]');
+    expect(migration).toContain('CHECK ("order_index" BETWEEN 0 AND 4)');
+    expect(migration).toContain(
+      'CREATE UNIQUE INDEX "sighting_photos_sighting_id_order_index_key"',
+    );
+    expect(migration).not.toMatch(/^\s*(?:DELETE FROM|DROP TABLE|TRUNCATE)\b/mu);
+  });
+
   it('creates observer ownership and globally unique idempotency keys', () => {
     const schema = readRepositoryFile('prisma/schema.prisma');
 
@@ -226,6 +240,54 @@ describe.runIf(postgresEnabled)('observer submissions against PostgreSQL', () =>
     await expect(
       prisma.sighting.findUniqueOrThrow({ where: { id: fixture.sightingId } }),
     ).resolves.toMatchObject({ observerUserId: null });
+  });
+
+  it('admits only one concurrent fifth photo with a unique bounded order', async () => {
+    const sightingId = `it-photo-concurrency-${process.pid}`;
+    await prisma.sighting.deleteMany({ where: { id: sightingId } });
+    try {
+      await prisma.sighting.create({
+        data: {
+          id: sightingId,
+          latitude: 48.5,
+          longitude: -123,
+          observedAt: new Date(),
+          observerEmail: 'photo-concurrency@example.invalid',
+        },
+      });
+      await prisma.sightingPhoto.createMany({
+        data: [0, 1, 2, 3].map((orderIndex) => ({
+          orderIndex,
+          sightingId,
+          storageKey: `sightings/${sightingId}/photo-${orderIndex}-1024.webp`,
+          thumbnailUrl: `https://api.example/media/${orderIndex}?variant=thumbnail`,
+          url: `https://api.example/media/${orderIndex}`,
+        })),
+      });
+
+      const attempts = await Promise.allSettled([0, 1].map((attempt) => (
+        prisma.sightingPhoto.create({
+          data: {
+            orderIndex: 4,
+            sightingId,
+            storageKey: `sightings/${sightingId}/concurrent-${attempt}-1024.webp`,
+            thumbnailUrl: `https://api.example/media/concurrent-${attempt}?variant=thumbnail`,
+            url: `https://api.example/media/concurrent-${attempt}`,
+          },
+        })
+      )));
+
+      expect(attempts.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
+      expect(attempts.filter(({ status }) => status === 'rejected')).toHaveLength(1);
+      const photos = await prisma.sightingPhoto.findMany({
+        orderBy: { orderIndex: 'asc' },
+        where: { sightingId },
+      });
+      expect(photos).toHaveLength(5);
+      expect(new Set(photos.map(({ orderIndex }) => orderIndex)).size).toBe(5);
+    } finally {
+      await prisma.sighting.deleteMany({ where: { id: sightingId } });
+    }
   });
 
   it('preserves legacy users and sightings across the staged Task 2 upgrade', async () => {
