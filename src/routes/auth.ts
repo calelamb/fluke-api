@@ -16,7 +16,11 @@ const LoginBody = z.object({
 });
 
 export default async function authRoutes(app: FastifyInstance) {
-  app.post('/login', async (req, reply) => {
+  app.post('/login', {
+    config: {
+      rateLimit: { max: 5, timeWindow: '15 minutes' },
+    },
+  }, async (req, reply) => {
     const parsed = LoginBody.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: 'Invalid request' });

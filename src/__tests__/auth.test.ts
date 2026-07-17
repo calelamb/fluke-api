@@ -57,7 +57,7 @@ describe('auth routes', () => {
 
   beforeAll(async () => {
     TEST_USER.passwordHash = await bcrypt.hash('correct-horse-battery-staple', 10);
-    app = await buildApp({ silent: true });
+    app = await buildApp({ silent: true, trustProxy: 1 });
     await app.ready();
   });
 
@@ -140,6 +140,7 @@ describe('auth routes', () => {
       const response = await app.inject({
         method: 'POST',
         url: '/api/v1/auth/login',
+        headers: { 'x-forwarded-for': '198.51.100.41' },
         payload: { email: TEST_USER.email, password: 'correct-horse-battery-staple' },
       });
 
@@ -154,6 +155,7 @@ describe('auth routes', () => {
       const response = await app.inject({
         method: 'POST',
         url: '/api/v1/auth/login',
+        headers: { 'x-forwarded-for': '198.51.100.40' },
         payload: { email: TEST_USER.email, password: 'correct-horse-battery-staple' },
       });
 
@@ -169,6 +171,19 @@ describe('auth routes', () => {
       expect(cookieValue).toContain('fluke_admin=');
       expect(cookieValue.toLowerCase()).toContain('httponly');
       expect(cookieValue.toLowerCase()).toContain('samesite=lax');
+    });
+
+    it('rate limits repeated admin login attempts', async () => {
+      vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
+
+      const responses = await Promise.all(Array.from({ length: 6 }, () => app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        headers: { 'x-forwarded-for': '198.51.100.42' },
+        payload: { email: 'unknown@example.com', password: 'whatever' },
+      })));
+
+      expect(responses.map((response) => response.statusCode)).toContain(429);
     });
   });
 
