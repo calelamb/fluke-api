@@ -26,7 +26,7 @@ async function removeWithRetries(storage: StorageBackend, key: string): Promise<
   return false;
 }
 
-async function cleanupObjects(
+export async function cleanupPhotoObjects(
   storage: StorageBackend,
   keys: readonly string[],
   recordCleanupFailure: (failure: PhotoCleanupFailure) => void,
@@ -56,7 +56,7 @@ export async function storePhotoPair(input: {
   try {
     thumbnail = await input.storage.put(input.thumbnail);
   } catch (error: unknown) {
-    await cleanupObjects(input.storage, [large.key], recordCleanupFailure);
+    await cleanupPhotoObjects(input.storage, [large.key], recordCleanupFailure);
     throw error;
   }
 
@@ -65,7 +65,7 @@ export async function storePhotoPair(input: {
     await input.createPhoto(pair);
     return pair;
   } catch (error: unknown) {
-    await cleanupObjects(input.storage, [large.key, thumbnail.key], recordCleanupFailure);
+    await cleanupPhotoObjects(input.storage, [large.key, thumbnail.key], recordCleanupFailure);
     throw error;
   }
 }

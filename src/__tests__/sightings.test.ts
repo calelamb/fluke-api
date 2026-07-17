@@ -259,6 +259,24 @@ describe('sightings routes', () => {
       expect(prisma.sighting.create).not.toHaveBeenCalled();
     });
 
+    it('retries the full serializable transaction after P2034 with no visible winner', async () => {
+      const transaction = vi.mocked(prisma.$transaction);
+      transaction
+        .mockRejectedValueOnce(Object.assign(new Error('serialization conflict'), { code: 'P2034' }))
+        .mockImplementationOnce(async (callback) => callback(prisma as never) as never);
+      vi.mocked(prisma.submissionIdempotency.findUnique).mockResolvedValue(null);
+      vi.mocked(prisma.sighting.create).mockResolvedValue({ id: 'retry-winner' } as never);
+
+      const response = await app.inject({
+        method: 'POST', payload: validBody, remoteAddress: '127.0.0.21',
+        url: '/api/v1/sightings',
+      });
+
+      expect(response.statusCode).toBe(201);
+      expect(response.json<{ id: string }>().id).toBe('retry-winner');
+      expect(transaction).toHaveBeenCalledTimes(2);
+    });
+
     it('requires CSRF for an authenticated observer and records ownership', async () => {
       resolveOptionalObserver.mockResolvedValue({
         displayName: 'Account Name', email: 'account@example.com', id: 'observer-1',

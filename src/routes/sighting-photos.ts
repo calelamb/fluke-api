@@ -10,10 +10,11 @@ import sharp from 'sharp';
 import { prisma } from '../db.js';
 import { env } from '../env.js';
 import { requireAdmin, resolveOptionalAdmin, type AdminClaims } from '../lib/auth.js';
+import { requireCsrf } from '../lib/csrf.js';
 import { resolveOptionalObserver } from '../lib/observer-auth.js';
 import { IdempotencyConflictError } from '../lib/idempotency.js';
 import { buildPhotoFilename, getStorageBackend } from '../lib/storage.js';
-import { storePhotoPair } from '../services/sighting-photo-storage.js';
+import { cleanupPhotoObjects, storePhotoPair } from '../services/sighting-photo-storage.js';
 import {
   PHOTO_UPLOAD_TOKEN_TYPE,
   type PhotoUploadTokenPayload,
@@ -22,7 +23,6 @@ import {
 const MAX_PHOTOS_PER_SIGHTING = 5;
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
 const ACCEPTED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
-const PUBLIC_UPLOAD_WINDOW_MS = 30 * 60 * 1000; // 30 minutes after sighting create
 const PHOTO_UPLOAD_TOKEN_HEADER = 'x-photo-upload-token';
 const MAX_INPUT_PIXELS = 40_000_000;
 
@@ -148,7 +148,7 @@ async function findPhotoReplayWithClient(
   if (idempotency === null) return null;
   const existing = await database.sightingPhoto.findUnique({ where: { id: idempotency.photoId } });
   if (existing === null) return null;
-  const fingerprint = `${idempotency.requestHash.slice(0, 12)}-${idempotency.photoId.slice(0, 8)}`;
+  const fingerprint = `${idempotency.requestHash}-${idempotency.photoId.slice(0, 8)}`;
   if (existing.sightingId !== authorization.sightingId || !existing.storageKey.includes(fingerprint)) {
     throw new IdempotencyConflictError();
   }
@@ -162,6 +162,7 @@ async function authorizePhotoUpload(
 ): Promise<UploadAuthorization | null> {
   const sightingId = request.params.id;
   const admin = await resolveOptionalAdmin(request);
+  const observer = admin === null ? await resolveOptionalObserver(request, reply) : null;
   const token = verifyPhotoUploadToken(fastify, request, sightingId);
   if (!token.ok && token.reason === 'invalid') {
     reply.code(403).send({ error: 'Invalid photo upload token.' });
@@ -172,10 +173,16 @@ async function authorizePhotoUpload(
     reply.code(404).send({ error: 'Sighting not found' });
     return null;
   }
-  const expired = Date.now() - sighting.createdAt.getTime() > PUBLIC_UPLOAD_WINDOW_MS;
-  if (!admin && (sighting.status !== 'PENDING' || (!token.ok && expired))) {
+  if (!admin && sighting.status !== 'PENDING') {
     reply.code(403).send({ error: 'This sighting is not accepting photo uploads.' });
     return null;
+  }
+  if (!admin && !token.ok) {
+    if (observer === null || observer.id !== sighting.observerUserId) {
+      reply.code(403).send({ error: 'This sighting is not accepting photo uploads.' });
+      return null;
+    }
+    await requireCsrf(request, reply);
   }
   return Object.freeze({
     admin,
@@ -229,19 +236,20 @@ async function persistPhoto(
   variants: PhotoVariants,
   idempotency: PhotoIdempotency | null,
   database: Pick<Prisma.TransactionClient, 'sightingPhoto'> = prisma,
+  onStored?: (keys: readonly string[]) => void,
 ): Promise<Awaited<ReturnType<typeof prisma.sightingPhoto.create>>> {
   const storage = getStorageBackend();
   const prefix = `sightings/${authorization.sightingId}`;
   const photoId = idempotency?.photoId ?? randomUUID();
   const stem = idempotency === null
     ? variants.baseFilename.replace(/\.[^./]+$/u, '')
-    : `${idempotency.requestHash.slice(0, 12)}-${photoId.slice(0, 8)}`;
+    : `${idempotency.requestHash}-${photoId.slice(0, 8)}`;
   const existingCount = await database.sightingPhoto.count({
     where: { sightingId: authorization.sightingId },
   });
   if (existingCount >= MAX_PHOTOS_PER_SIGHTING) throw new PhotoLimitError();
   let photo: Awaited<ReturnType<typeof prisma.sightingPhoto.create>> | undefined;
-  await storePhotoPair({
+  const pair = await storePhotoPair({
     createPhoto: async ({ large }) => {
       photo = await database.sightingPhoto.create({
         data: {
@@ -261,6 +269,7 @@ async function persistPhoto(
     storage,
     thumbnail: { body: variants.thumbnail, contentType: 'image/webp', filename: `${stem}-256.webp`, prefix },
   });
+  onStored?.([pair.large.key, pair.thumbnail.key]);
   if (!photo) throw new Error('Photo persistence did not complete');
   return photo;
 }
@@ -276,13 +285,27 @@ async function persistIdempotentPhoto(
   variants: PhotoVariants,
   idempotency: PhotoIdempotency,
 ): Promise<PersistedPhotoResult> {
-  return prisma.$transaction(async (transaction) => {
-    await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${idempotency.photoId}, 0))`;
-    const replay = await findPhotoReplayWithClient(transaction, idempotency, authorization);
-    if (replay !== null) return Object.freeze({ photo: replay, replayed: true });
-    const photo = await persistPhoto(request, authorization, variants, idempotency, transaction);
-    return Object.freeze({ photo, replayed: false });
-  });
+  const storage = getStorageBackend();
+  let storedKeys: readonly string[] = [];
+  try {
+    return await prisma.$transaction(async (transaction) => {
+      await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${idempotency.photoId}, 0))`;
+      const replay = await findPhotoReplayWithClient(transaction, idempotency, authorization);
+      if (replay !== null) return Object.freeze({ photo: replay, replayed: true });
+      const photo = await persistPhoto(
+        request, authorization, variants, idempotency, transaction,
+        (keys) => { storedKeys = keys; },
+      );
+      return Object.freeze({ photo, replayed: false });
+    });
+  } catch (error: unknown) {
+    if (storedKeys.length > 0) {
+      await cleanupPhotoObjects(storage, storedKeys, (failure) => request.log.error(
+        failure, 'sighting photo transaction compensation failed',
+      ));
+    }
+    throw error;
+  }
 }
 
 async function recordAdminPhotoAudit(
@@ -343,8 +366,8 @@ const sightingPhotosRoutes: FastifyPluginAsync<SightingPhotosRouteOptions> = asy
    * admins; the auth check is opportunistic:
    *   - admin cookie present -> no time window, no per-request rate limit
    *     beyond what the route declares.
-   *   - no auth -> sighting must be PENDING and created within the last
-   *     30 minutes; per-IP rate limit applies.
+   *   - a sighting-scoped upload token, or the owning observer plus CSRF,
+   *     is required for non-admin uploads.
    * Both paths share the same multipart parsing and sharp pipeline.
    */
   if (options.submissions) fastify.post<{ Params: { id: string } }>(

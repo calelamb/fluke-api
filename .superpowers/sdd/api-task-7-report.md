@@ -63,6 +63,34 @@ git diff --check     passed
 - `ENABLE_IDENTIFY` and production capability flags were not changed.
 - No deploy, live bucket operation, or capability enablement was performed.
 
-## Concern
+## Independent Review Fixes
 
-The local shell runs Node `v25.9.0`, while the repository pins Node `22.17.0`; all commands passed with an engine warning. CI must remain the authoritative Node 22.17 verification.
+All four Important findings and the Minor finding from the first independent review were addressed under focused RED/GREEN tests:
+
+1. Photo mutation authorization now requires admin authorization, a valid sighting-scoped private upload token, or the owning observer plus CSRF. Anonymous-by-ID, cross-owner, and present-invalid observer-cookie cases are rejected.
+2. A serialization failure with no visible winner now retries the complete serializable submission transaction, bounded to three attempts.
+3. Idempotent photo storage tracks both stored keys outside the transaction and compensates them if the outer Prisma transaction fails after its callback completed.
+4. The isolated PostgreSQL suite now exercises the real multipart upload route under a concurrent fifth-photo race and the real Logbook route across two users and a cursor boundary.
+5. Photo request fingerprints now persist and compare the complete SHA-256 digest; a changed-bytes replay test and a full-digest storage assertion cover the contract.
+
+Second verification snapshot:
+
+```text
+Exact Node 22.17.0 full suite:
+  48 files passed, 3 PostgreSQL-only suites skipped
+  438 tests passed, 17 skipped, 0 failed
+
+Exact Node 22.17.0 coverage:
+  statements 91.41%
+  branches   85.79%
+  functions  94.73%
+  lines      91.41%
+
+Real isolated PostgreSQL:
+  10 tests passed, including route-level fifth-photo/storage compensation
+  and cross-user cursor-bounded Logbook isolation
+
+Exact Node 22.17.0 typecheck, lint, contract generation/check, audit, and build passed.
+```
+
+No production flag, deployment, identification route, or live object bucket was changed.

@@ -12,10 +12,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PrismaClient } from '@prisma/client';
+import FormData from 'form-data';
+import { SignJWT } from 'jose';
+import sharp from 'sharp';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 const postgresEnabled = process.env.RUN_POSTGRES_INTEGRATION === 'true';
+const integrationUploadsRoot = postgresEnabled
+  ? mkdtempSync(join(tmpdir(), 'fluke-task7-route-media-'))
+  : join(tmpdir(), 'fluke-task7-route-media-disabled');
+if (postgresEnabled) {
+  process.env.UPLOADS_DIR = integrationUploadsRoot;
+  process.env.OBSERVER_JWT_SECRET = 'task7-observer-jwt-secret-that-is-more-than-forty-three-characters';
+}
 
 function readRepositoryFile(relativePath: string): string {
   return readFileSync(`${repositoryRoot}${relativePath}`, 'utf8');
@@ -202,6 +212,7 @@ describe.runIf(postgresEnabled)('observer submissions against PostgreSQL', () =>
     await prisma.sighting.deleteMany({ where: { id: fixture.sightingId } });
     await prisma.user.deleteMany({ where: { id: fixture.userId } });
     await prisma.$disconnect();
+    rmSync(integrationUploadsRoot, { force: true, recursive: true });
   });
 
   it('persists observer ownership and enforces global idempotency uniqueness', async () => {
@@ -337,6 +348,111 @@ describe.runIf(postgresEnabled)('observer submissions against PostgreSQL', () =>
       expect(new Set(photos.map(({ orderIndex }) => orderIndex)).size).toBe(5);
     } finally {
       await prisma.sighting.deleteMany({ where: { id: sightingId } });
+    }
+  });
+
+  it('enforces the fifth-photo race through the upload route and compensates storage', async () => {
+    const sightingId = `it-photo-route-${process.pid}`;
+    const clientSubmissionId = '1c39ac39-ce63-498c-9197-48f64ebaddb7';
+    const { buildApp } = await import('../../src/app.js');
+    const app = await buildApp({
+      features: Object.freeze({ accounts: false, identification: false, submissions: true }),
+      silent: true,
+    });
+    await app.ready();
+    try {
+      await prisma.sighting.create({
+        data: {
+          id: sightingId, latitude: 48.5, longitude: -123,
+          observedAt: new Date(), observerEmail: 'route-photo@example.invalid',
+        },
+      });
+      await prisma.sightingPhoto.createMany({
+        data: [0, 1, 2, 3].map((orderIndex) => ({
+          orderIndex, sightingId, storageKey: `fixtures/${orderIndex}`,
+          thumbnailUrl: `https://api.example/thumb/${orderIndex}`,
+          url: `https://api.example/photo/${orderIndex}`,
+        })),
+      });
+      const token = app.jwt.sign(
+        { clientSubmissionId, sightingId, type: 'photo-upload' }, { expiresIn: '24h' },
+      );
+      const photos = await Promise.all(['#102030', '#f0e0d0'].map((background) => sharp({
+        create: { width: 64, height: 48, channels: 3, background },
+      }).png().toBuffer()));
+      const responses = await Promise.all(photos.map((photo, index) => {
+        const form = new FormData();
+        form.append('file', photo, { filename: `race-${index}.png`, contentType: 'image/png' });
+        return app.inject({
+          headers: {
+            ...form.getHeaders(),
+            'idempotency-key': `${clientSubmissionId}:${index === 0 ? 'd362c2c9-c281-4545-b9fd-41a49cbed157' : 'ab253f94-18df-4201-965a-2aaf81ed62b1'}`,
+            'x-photo-upload-token': token,
+          },
+          method: 'POST', payload: form, remoteAddress: `127.0.2.${index + 1}`,
+          url: `/api/v1/sightings/${sightingId}/photos`,
+        });
+      }));
+
+      expect(responses.filter(({ statusCode }) => statusCode === 201)).toHaveLength(1);
+      expect(responses.every(({ statusCode }) => [201, 400, 503].includes(statusCode))).toBe(true);
+      await expect(prisma.sightingPhoto.count({ where: { sightingId } })).resolves.toBe(5);
+      const mediaDirectory = join(integrationUploadsRoot, 'sightings', sightingId);
+      expect(readdirSync(mediaDirectory)).toHaveLength(2);
+    } finally {
+      await prisma.sighting.deleteMany({ where: { id: sightingId } });
+      await app.close();
+    }
+  });
+
+  it('paginates Logbook rows without crossing observer ownership', async () => {
+    const firstUserId = `it-logbook-one-${process.pid}`;
+    const secondUserId = `it-logbook-two-${process.pid}`;
+    const ids = [`${firstUserId}-new`, `${firstUserId}-old`, `${secondUserId}-private`];
+    const { buildApp } = await import('../../src/app.js');
+    const app = await buildApp({
+      features: Object.freeze({ accounts: true, identification: false, submissions: false }),
+      silent: true,
+    });
+    await app.ready();
+    try {
+      await prisma.user.createMany({
+        data: [firstUserId, secondUserId].map((id) => ({ id, role: 'OBSERVER' })),
+      });
+      await prisma.sighting.createMany({
+        data: [
+          { id: ids[0], observerUserId: firstUserId, observedAt: new Date('2026-07-17T13:00:00Z') },
+          { id: ids[1], observerUserId: firstUserId, observedAt: new Date('2026-07-17T12:00:00Z') },
+          { id: ids[2], observerUserId: secondUserId, observedAt: new Date('2026-07-17T14:00:00Z') },
+        ].map((row) => ({
+          ...row, latitude: 48.5, longitude: -123,
+          observerEmail: 'logbook-fixture@example.invalid',
+        })),
+      });
+      const session = await new SignJWT({
+        role: 'OBSERVER', sessionVersion: 1, type: 'observer-session',
+      })
+        .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+        .setAudience('fluke-ios-observer').setIssuer('fluke-api').setSubject(firstUserId)
+        .setIssuedAt().setExpirationTime('1h')
+        .sign(new TextEncoder().encode(process.env.OBSERVER_JWT_SECRET));
+      const first = await app.inject({
+        headers: { cookie: `fluke_observer=${session}` }, method: 'GET',
+        url: '/api/v1/sightings/me?limit=1',
+      });
+      expect(first.statusCode).toBe(200);
+      const firstBody = first.json<{ items: { id: string }[]; page: { nextCursor: string } }>();
+      expect(firstBody.items.map(({ id }) => id)).toEqual([ids[0]]);
+      const second = await app.inject({
+        headers: { cookie: `fluke_observer=${session}` }, method: 'GET',
+        url: `/api/v1/sightings/me?limit=1&cursor=${encodeURIComponent(firstBody.page.nextCursor)}`,
+      });
+      expect(second.statusCode).toBe(200);
+      expect(second.json<{ items: { id: string }[] }>().items.map(({ id }) => id)).toEqual([ids[1]]);
+    } finally {
+      await prisma.sighting.deleteMany({ where: { id: { in: ids } } });
+      await prisma.user.deleteMany({ where: { id: { in: [firstUserId, secondUserId] } } });
+      await app.close();
     }
   });
 

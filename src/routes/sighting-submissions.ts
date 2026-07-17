@@ -42,6 +42,8 @@ interface SubmissionResult {
   readonly sighting: { readonly id: string };
 }
 
+const SERIALIZABLE_ATTEMPTS = 3;
+
 function validateHeaderIdempotencyKey(
   header: string | readonly string[] | undefined,
   clientSubmissionId: string,
@@ -81,33 +83,36 @@ async function createOrReplaySubmission(
   observer: ObserverPrincipal | null,
 ): Promise<SubmissionResult> {
   const hashes = buildSubmissionHashes(body, observer);
-  try {
-    return await prisma.$transaction(async (transaction) => {
-      const existing = await transaction.submissionIdempotency.findUnique({
+  for (let attempt = 1; attempt <= SERIALIZABLE_ATTEMPTS; attempt += 1) {
+    try {
+      return await prisma.$transaction(async (transaction) => {
+        const existing = await transaction.submissionIdempotency.findUnique({
+          where: { keyHash: hashes.keyHash },
+          select: { requestHash: true, sighting: { select: { id: true } } },
+        });
+        if (existing !== null) return resolveReplay(existing, hashes.requestHash);
+        const sighting = await transaction.sighting.create({ data: sightingData(body, observer) });
+        await transaction.submissionIdempotency.create({
+          data: {
+            keyHash: hashes.keyHash,
+            requestHash: hashes.requestHash,
+            sightingId: sighting.id,
+            userId: observer?.id,
+          },
+        });
+        return Object.freeze({ created: true, sighting: { id: sighting.id } });
+      }, { isolationLevel: 'Serializable' });
+    } catch (error: unknown) {
+      if (!isPrismaReplayRace(error)) throw error;
+      const winner = await prisma.submissionIdempotency.findUnique({
         where: { keyHash: hashes.keyHash },
         select: { requestHash: true, sighting: { select: { id: true } } },
       });
-      if (existing !== null) return resolveReplay(existing, hashes.requestHash);
-      const sighting = await transaction.sighting.create({ data: sightingData(body, observer) });
-      await transaction.submissionIdempotency.create({
-        data: {
-          keyHash: hashes.keyHash,
-          requestHash: hashes.requestHash,
-          sightingId: sighting.id,
-          userId: observer?.id,
-        },
-      });
-      return Object.freeze({ created: true, sighting: { id: sighting.id } });
-    }, { isolationLevel: 'Serializable' });
-  } catch (error: unknown) {
-    if (!isPrismaReplayRace(error)) throw error;
-    const winner = await prisma.submissionIdempotency.findUnique({
-      where: { keyHash: hashes.keyHash },
-      select: { requestHash: true, sighting: { select: { id: true } } },
-    });
-    if (winner === null) throw error;
-    return resolveReplay(winner, hashes.requestHash);
+      if (winner !== null) return resolveReplay(winner, hashes.requestHash);
+      if (attempt === SERIALIZABLE_ATTEMPTS) throw error;
+    }
   }
+  throw new Error('Serializable submission retry exhausted');
 }
 
 function issuePhotoUploadToken(
