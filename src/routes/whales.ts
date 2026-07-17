@@ -35,6 +35,13 @@ const WhaleTrackQuerySchema = z.object({
   from: IsoDateTimeSchema.optional(),
   to: IsoDateTimeSchema.optional(),
 }).strict().superRefine((value, context) => {
+  if ((value.from === undefined) !== (value.to === undefined)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'from and to must be provided together',
+      path: ['from'],
+    });
+  }
   if (value.from && value.to && Date.parse(value.from) > Date.parse(value.to)) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
@@ -202,15 +209,15 @@ function findTrackPoints(
   whaleId: string,
   query: z.infer<typeof WhaleTrackQuerySchema>,
 ) {
-  const observedAt = {
-    ...(query.from ? { gte: new Date(query.from) } : {}),
-    ...(query.to ? { lte: new Date(query.to) } : {}),
-  };
+  const to = query.to ? new Date(query.to) : new Date();
+  const from = query.from
+    ? new Date(query.from)
+    : new Date(to.getTime() - MAX_TRACK_WINDOW_MS);
   return transaction.sighting.findMany({
     where: {
+      observedAt: { gte: from, lte: to },
       status: 'APPROVED',
       whales: { some: { whaleId } },
-      ...(Object.keys(observedAt).length > 0 ? { observedAt } : {}),
     },
     orderBy: [{ observedAt: 'asc' }, { id: 'asc' }],
     take: MAX_TRACK_POINTS,

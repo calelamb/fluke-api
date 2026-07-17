@@ -245,7 +245,10 @@ describe('whales routes', () => {
   });
 
   describe('GET /api/v1/whales/:id/track', () => {
-    it('returns the canonical ordered track using database whale ID semantics', async () => {
+    it('returns the canonical ordered track with a deterministic bounded default window', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      const now = new Date('2026-07-16T18:00:00.000Z');
+      vi.setSystemTime(now);
       vi.mocked(prisma.whale.findUnique).mockResolvedValue({
         id: 'uuid-j35',
         catalogId: 'J35',
@@ -261,28 +264,103 @@ describe('whales routes', () => {
         },
       ] as never);
 
+      try {
+        const response = await app.inject({
+          method: 'GET',
+          url: '/api/v1/whales/uuid-j35/track',
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(WhaleTrackSchema.parse(response.json())).toMatchObject({
+          whaleId: 'uuid-j35',
+          catalogId: 'J35',
+          points: [{ id: 'sighting-a' }],
+        });
+        expect(prisma.whale.findUnique).toHaveBeenCalledWith({
+          where: { id: 'uuid-j35' },
+          select: { catalogId: true, id: true },
+        });
+        expect(prisma.sighting.findMany).toHaveBeenCalledWith(expect.objectContaining({
+          orderBy: [{ observedAt: 'asc' }, { id: 'asc' }],
+          take: 1_000,
+          where: {
+            observedAt: {
+              gte: new Date(now.getTime() - 366 * 24 * 60 * 60 * 1_000),
+              lte: now,
+            },
+            status: 'APPROVED',
+            whales: { some: { whaleId: 'uuid-j35' } },
+          },
+        }));
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it.each([
+      '/api/v1/whales/uuid-j35/track?from=2026-01-01T00%3A00%3A00.000Z',
+      '/api/v1/whales/uuid-j35/track?to=2026-01-01T00%3A00%3A00.000Z',
+    ])('rejects one-sided track window %s with the canonical 400 envelope', async (url) => {
       const response = await app.inject({
+        headers: { 'x-request-id': 'one-sided-track-window' },
         method: 'GET',
-        url: '/api/v1/whales/uuid-j35/track',
+        url,
       });
 
-      expect(response.statusCode).toBe(200);
-      expect(WhaleTrackSchema.parse(response.json())).toMatchObject({
-        whaleId: 'uuid-j35',
+      expect(response.statusCode).toBe(400);
+      expect(SafeErrorSchema.parse(response.json())).toEqual({
+        code: 'VALIDATION_ERROR',
+        message: 'The request is invalid.',
+        requestId: 'one-sided-track-window',
+        retryable: false,
+      });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['2026-02-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'],
+      ['2024-01-01T00:00:00.000Z', '2025-01-02T00:00:00.001Z'],
+    ])('rejects invalid explicit track window %s to %s', async (from, to) => {
+      const query = new URLSearchParams({ from, to });
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/v1/whales/uuid-j35/track?${query}`,
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(SafeErrorSchema.parse(response.json()).code).toBe('VALIDATION_ERROR');
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('supports adjacent explicit windows so clients can chunk multi-year tracks', async () => {
+      vi.mocked(prisma.whale.findUnique).mockResolvedValue({
+        id: 'uuid-j35',
         catalogId: 'J35',
-        points: [{ id: 'sighting-a' }],
-      });
-      expect(prisma.whale.findUnique).toHaveBeenCalledWith({
-        where: { id: 'uuid-j35' },
-        select: { catalogId: true, id: true },
-      });
-      expect(prisma.sighting.findMany).toHaveBeenCalledWith(expect.objectContaining({
-        orderBy: [{ observedAt: 'asc' }, { id: 'asc' }],
-        take: 1_000,
-        where: {
-          status: 'APPROVED',
-          whales: { some: { whaleId: 'uuid-j35' } },
-        },
+      } as never);
+      vi.mocked(prisma.sighting.findMany).mockResolvedValue([]);
+      const windows = [
+        ['2024-01-01T00:00:00.000Z', '2025-01-01T00:00:00.000Z'],
+        ['2025-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'],
+      ] as const;
+
+      for (const [from, to] of windows) {
+        const query = new URLSearchParams({ from, to });
+        const response = await app.inject({
+          method: 'GET',
+          url: `/api/v1/whales/uuid-j35/track?${query}`,
+        });
+        expect(response.statusCode).toBe(200);
+      }
+
+      expect(prisma.sighting.findMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        where: expect.objectContaining({
+          observedAt: { gte: new Date(windows[0][0]), lte: new Date(windows[0][1]) },
+        }),
+      }));
+      expect(prisma.sighting.findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        where: expect.objectContaining({
+          observedAt: { gte: new Date(windows[1][0]), lte: new Date(windows[1][1]) },
+        }),
       }));
     });
 
