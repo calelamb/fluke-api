@@ -64,6 +64,42 @@ describe('release configuration', () => {
     expect(dockerfile).toContain('RUN mkdir -p /app/uploads && chown node:node /app/uploads');
   });
 
+  it('runs migrations through the production entrypoint before starting the API', () => {
+    const dockerfile = readRepositoryFile('Dockerfile');
+    const entrypoint = readRepositoryFile('scripts/docker-entrypoint.sh');
+
+    expect(dockerfile).toContain(
+      'COPY --from=build --chown=node:node /app/scripts/docker-entrypoint.sh ./scripts/docker-entrypoint.sh',
+    );
+    expect(dockerfile).toContain('ENTRYPOINT ["./scripts/docker-entrypoint.sh"]');
+    expect(dockerfile).toContain('CMD ["node", "dist/src/index.js"]');
+    expect(entrypoint).toContain('./node_modules/.bin/prisma migrate deploy');
+    expect(entrypoint).toContain('exec "$@"');
+  });
+
+  it('proves the production image can migrate a blank database in the container smoke', () => {
+    const workflow = readRepositoryFile('.github/workflows/ci.yml');
+    const containerSmoke = workflow.slice(workflow.indexOf('  container-smoke:'));
+    const beforeDockerBuild = containerSmoke.slice(
+      0,
+      containerSmoke.indexOf('- uses: docker/setup-buildx-action'),
+    );
+
+    expect(beforeDockerBuild).not.toContain('pnpm db:migrate:deploy');
+    expect(containerSmoke).toContain('curl --fail --silent http://localhost:4000/api/v1/ready');
+  });
+
+  it('documents fail-closed startup migrations for the Render Free release path', () => {
+    const readme = readRepositoryFile('README.md');
+    const deployment = readRepositoryFile('docs/deployment.md');
+
+    expect(readme).toContain('entrypoint runs `prisma migrate deploy` before the API process');
+    expect(deployment).toContain(
+      'The image entrypoint runs `prisma migrate deploy` before starting Node',
+    );
+    expect(deployment).toContain('migration failure exits the container before the API can listen');
+  });
+
   it('runs production migrations before Railway starts the API image', () => {
     const railwayConfig = JSON.parse(readRepositoryFile('railway.json')) as {
       deploy?: { preDeployCommand?: string[] };

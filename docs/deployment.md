@@ -49,15 +49,9 @@ Require the candidate commit to be green in GitHub Actions. The run must include
 ## Database gate
 
 1. Create a Neon restore point or protected branch and record its database identity before migration.
-2. Against that resolved identity, run the exact candidate image's migration command:
-
-   ```bash
-   npm run db:migrate:deploy
-   npm run db:migrate:status
-   npm run db:verify-seed:runtime
-   ```
-
-3. Confirm `20260717170000_add_observer_submissions` and every later committed migration are applied. Migration status and the seed verifier must exit zero.
+2. Confirm the same-SHA container smoke started each candidate image against a blank PostgreSQL database and reached `/api/v1/ready` without a separate migration step.
+3. Use the exact candidate image during the safe all-off deploy below. The image entrypoint runs `prisma migrate deploy` before starting Node; a migration failure exits the container before the API can listen.
+4. Inspect the Render startup log and confirm Prisma reports `20260717170000_add_observer_submissions` and every later committed migration applied or already current. Then require `/api/v1/ready` to return `200`, which verifies the required migration marker and database probe before launch continues.
 
 The production image also exposes an idempotent seed command when canonical seed repair is explicitly required:
 
