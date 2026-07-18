@@ -112,17 +112,11 @@ docker run --rm --publish 4000:4000 \
 curl --fail http://localhost:4000/api/v1/ready
 ```
 
-The runtime image already sets `NODE_ENV=production` and `UPLOADS_DIR=/app/uploads`; the explicit flags above document the effective values and the volume's writable mount point. CI overrides its test-process environment with `NODE_ENV=production` when it smokes the pruned runtime image.
-
-Database migrations are intentionally not part of the image startup command. Apply them as a separate, observable release step before starting the new application image:
-
-```bash
-pnpm db:migrate:deploy
-```
+The runtime image already sets `NODE_ENV=production` and `UPLOADS_DIR=/app/uploads`; the explicit flags above document the effective values and the volume's writable mount point. Its entrypoint runs `prisma migrate deploy` before the API process and exits without starting Node if migration deployment fails. CI proves this path against a blank PostgreSQL database before it accepts the image.
 
 ## Production release
 
-Release A currently runs the repository Docker image on a Render Free web service at `https://fluke-api.onrender.com`, backed by external Neon Postgres. Apply and verify migrations before deploying, then require public `200` responses from `/api/v1/health` and `/api/v1/ready`, validate the catalog and CORS contract, and confirm Release B routes remain fail-closed. The checked-in `railway*.json` files remain an alternative paid topology, not the active host.
+Release A currently runs the repository Docker image on a Render Free web service at `https://fluke-api.onrender.com`, backed by external Neon Postgres. The image applies committed migrations before starting the API; verify that startup and then require public `200` responses from `/api/v1/health` and `/api/v1/ready`, validate the catalog and CORS contract, and confirm Release B routes remain fail-closed. The checked-in `railway*.json` files remain an alternative paid topology, not the active host.
 
 Scheduled ingestion and prediction run through `.github/workflows/scheduled-jobs.yml` using bounded standard GitHub-hosted jobs and repository secrets. See the operational documents below for the exact no-charge topology, probes, timeouts, and retry rules.
 
@@ -135,7 +129,7 @@ Operational procedures:
 
 ## CI release gates
 
-GitHub Actions installs the pinned toolchain, starts PostgreSQL, applies migrations, checks standalone layout and contract drift, type-checks, lints, enforces coverage, builds, audits production dependencies, and installs Gitleaks `8.30.1`. The action's event scan runs without PR comments under read-only permissions, followed by an explicit `--all` full-history scan. CI then builds the non-root container and verifies it in production mode against the migrated PostgreSQL service.
+GitHub Actions installs the pinned toolchain, starts PostgreSQL, applies migrations, checks standalone layout and contract drift, type-checks, lints, enforces coverage, builds, audits production dependencies, and installs Gitleaks `8.30.1`. The action's event scan runs without PR comments under read-only permissions, followed by an explicit `--all` full-history scan. CI then builds the non-root container and verifies that its production entrypoint migrates a blank PostgreSQL database before readiness succeeds.
 
 Run the locally available equivalents before pushing:
 
