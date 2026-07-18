@@ -69,6 +69,13 @@ describe('observer release security gates', () => {
     })).not.toThrow();
   });
 
+  it('loads the reviewed database environment in every migration job', () => {
+    const workflow = readRepositoryFile('.github/workflows/ci.yml');
+    const environmentLoads = workflow.match(/cat \.github\/ci-test\.env >> "\$GITHUB_ENV"/gu);
+
+    expect(environmentLoads).toHaveLength(2);
+  });
+
   it('certifies both production feature modes and keeps identify unavailable', () => {
     const workflow = readRepositoryFile('.github/workflows/ci.yml');
 
