@@ -2,6 +2,23 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
 
+const observerAuth = Object.freeze({
+  appleAuth: Object.freeze({
+    exchangeAppleAuthorizationCode: async () => { throw new Error('unused'); },
+    revokeAppleRefreshToken: async () => { throw new Error('unused'); },
+    verifyAppleIdentityToken: async () => { throw new Error('unused'); },
+  }),
+  storage: Object.freeze({
+    publicUrl: () => { throw new Error('unused'); },
+    put: async () => { throw new Error('unused'); },
+    remove: async () => { throw new Error('unused'); },
+  }),
+  tokenCrypto: Object.freeze({
+    decryptToken: () => { throw new Error('unused'); },
+    encryptToken: () => { throw new Error('unused'); },
+  }),
+});
+
 const RELEASE_A_FEATURES = Object.freeze({
   accounts: false,
   identification: false,
@@ -14,6 +31,8 @@ const FEATURE_ROUTE_CASES = [
     features: RELEASE_A_FEATURES,
     expected: Object.freeze({
       accountRoute: false,
+      logbookRoute: false,
+      observerAuthRoute: false,
       identifyRoute: false,
       photoAdminRoute: false,
       photoSubmissionRoute: false,
@@ -26,6 +45,8 @@ const FEATURE_ROUTE_CASES = [
     features: Object.freeze({ accounts: true, identification: false, submissions: false }),
     expected: Object.freeze({
       accountRoute: true,
+      logbookRoute: true,
+      observerAuthRoute: true,
       identifyRoute: false,
       photoAdminRoute: true,
       photoSubmissionRoute: false,
@@ -38,6 +59,8 @@ const FEATURE_ROUTE_CASES = [
     features: Object.freeze({ accounts: false, identification: true, submissions: false }),
     expected: Object.freeze({
       accountRoute: false,
+      logbookRoute: false,
+      observerAuthRoute: false,
       identifyRoute: true,
       photoAdminRoute: false,
       photoSubmissionRoute: false,
@@ -50,6 +73,8 @@ const FEATURE_ROUTE_CASES = [
     features: Object.freeze({ accounts: false, identification: false, submissions: true }),
     expected: Object.freeze({
       accountRoute: false,
+      logbookRoute: false,
+      observerAuthRoute: false,
       identifyRoute: false,
       photoAdminRoute: false,
       photoSubmissionRoute: true,
@@ -62,6 +87,8 @@ const FEATURE_ROUTE_CASES = [
     features: Object.freeze({ accounts: true, identification: true, submissions: false }),
     expected: Object.freeze({
       accountRoute: true,
+      logbookRoute: true,
+      observerAuthRoute: true,
       identifyRoute: true,
       photoAdminRoute: true,
       photoSubmissionRoute: false,
@@ -74,6 +101,8 @@ const FEATURE_ROUTE_CASES = [
     features: Object.freeze({ accounts: true, identification: false, submissions: true }),
     expected: Object.freeze({
       accountRoute: true,
+      logbookRoute: true,
+      observerAuthRoute: true,
       identifyRoute: false,
       photoAdminRoute: true,
       photoSubmissionRoute: true,
@@ -86,6 +115,8 @@ const FEATURE_ROUTE_CASES = [
     features: Object.freeze({ accounts: false, identification: true, submissions: true }),
     expected: Object.freeze({
       accountRoute: false,
+      logbookRoute: false,
+      observerAuthRoute: false,
       identifyRoute: true,
       photoAdminRoute: false,
       photoSubmissionRoute: true,
@@ -98,6 +129,8 @@ const FEATURE_ROUTE_CASES = [
     features: Object.freeze({ accounts: true, identification: true, submissions: true }),
     expected: Object.freeze({
       accountRoute: true,
+      logbookRoute: true,
+      observerAuthRoute: true,
       identifyRoute: true,
       photoAdminRoute: true,
       photoSubmissionRoute: true,
@@ -171,17 +204,35 @@ describe.each(FEATURE_ROUTE_CASES)('Release feature route ownership: $name', ({
   features,
 }) => {
   it('registers only routes owned by the enabled feature', async () => {
-    const app = await buildApp({ features, silent: true });
+    const app = await buildApp({
+      features,
+      ...(features.accounts ? { observerAuth } : {}),
+      silent: true,
+    });
 
     try {
       await app.ready();
 
       expect(app.hasRoute({ method: 'POST', url: '/api/v1/auth/login' }))
         .toBe(expected.accountRoute);
+      expect(app.hasRoute({ method: 'POST', url: '/api/v1/auth/apple' }))
+        .toBe(expected.observerAuthRoute);
+      expect(app.hasRoute({ method: 'GET', url: '/api/v1/auth/me' }))
+        .toBe(expected.observerAuthRoute);
+      expect(app.hasRoute({ method: 'POST', url: '/api/v1/auth/logout' }))
+        .toBe(expected.observerAuthRoute);
+      expect(app.hasRoute({ method: 'DELETE', url: '/api/v1/auth/account' }))
+        .toBe(expected.observerAuthRoute);
+      expect(app.hasRoute({ method: 'GET', url: '/api/v1/sightings/me' }))
+        .toBe(expected.logbookRoute);
+      expect(app.hasRoute({ method: 'GET', url: '/api/v1/admin/sightings' }))
+        .toBe(expected.accountRoute);
       expect(app.hasRoute({ method: 'POST', url: '/api/v1/identify' }))
         .toBe(expected.identifyRoute);
       expect(app.hasRoute({ method: 'GET', url: '/api/v1/sightings/:id/photos' }))
         .toBe(expected.photoAdminRoute);
+      expect(app.hasRoute({ method: 'GET', url: '/api/v1/media/:photoId' }))
+        .toBe(expected.photoAdminRoute || expected.photoSubmissionRoute);
       expect(app.hasRoute({ method: 'POST', url: '/api/v1/sightings/:id/photos' }))
         .toBe(expected.photoSubmissionRoute);
       expect(app.hasRoute({ method: 'GET', url: '/uploads/*' }))

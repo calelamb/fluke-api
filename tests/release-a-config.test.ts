@@ -15,14 +15,68 @@ const REQUIRED_ENV: NodeJS.ProcessEnv = {
   JWT_SECRET: 'x'.repeat(32),
 };
 
+const SAFE_S3_ENV: NodeJS.ProcessEnv = {
+  STORAGE_BACKEND: 's3',
+  OBJECT_STORAGE_ACCESS_KEY_ID: 'access',
+  OBJECT_STORAGE_BUCKET: 'fluke-private',
+  OBJECT_STORAGE_ENDPOINT: 'https://objects.example.com',
+  OBJECT_STORAGE_FORCE_PATH_STYLE: 'true',
+  OBJECT_STORAGE_REGION: 'us-west-2',
+  OBJECT_STORAGE_SECRET_ACCESS_KEY: 'secret',
+};
+
 const SAFE_PRODUCTION_ENV: NodeJS.ProcessEnv = {
   ...REQUIRED_ENV,
+  ...SAFE_S3_ENV,
   NODE_ENV: 'production',
   WEB_ORIGIN: 'https://fluke.example,https://www.fluke.example',
   API_PUBLIC_ORIGIN: 'https://api.fluke.example',
 };
 
 describe('Release A environment configuration', () => {
+  it('rejects a partial object-storage block even while local storage is selected', () => {
+    expect(() => parseEnv({
+      ...REQUIRED_ENV,
+      STORAGE_BACKEND: 'local',
+      OBJECT_STORAGE_BUCKET: 'partial-private-bucket',
+    })).toThrow(/OBJECT_STORAGE/);
+  });
+
+  it('rejects production local storage including the implicit default', () => {
+    expect(() => parseEnv({
+      ...REQUIRED_ENV,
+      NODE_ENV: 'production',
+      WEB_ORIGIN: 'https://fluke.example',
+      API_PUBLIC_ORIGIN: 'https://api.fluke.example',
+    })).toThrow(/STORAGE_BACKEND/);
+  });
+
+  it('requires every private S3 value when the S3 backend is selected', () => {
+    expect(() => parseEnv({
+      ...REQUIRED_ENV,
+      NODE_ENV: 'test',
+      STORAGE_BACKEND: 's3',
+    })).toThrow(/OBJECT_STORAGE_BUCKET/);
+  });
+
+  it('parses a complete private S3 configuration', () => {
+    expect(parseEnv({
+      ...REQUIRED_ENV,
+      NODE_ENV: 'test',
+      STORAGE_BACKEND: 's3',
+      OBJECT_STORAGE_ACCESS_KEY_ID: 'access',
+      OBJECT_STORAGE_BUCKET: 'fluke-private',
+      OBJECT_STORAGE_ENDPOINT: 'https://objects.example.com',
+      OBJECT_STORAGE_FORCE_PATH_STYLE: 'true',
+      OBJECT_STORAGE_REGION: 'us-west-2',
+      OBJECT_STORAGE_SECRET_ACCESS_KEY: 'secret',
+    })).toMatchObject({
+      OBJECT_STORAGE_BUCKET: 'fluke-private',
+      OBJECT_STORAGE_FORCE_PATH_STYLE: true,
+      STORAGE_BACKEND: 's3',
+    });
+  });
+
   it('defaults every Release B capability to false', () => {
     const parsed = parseEnv({ ...REQUIRED_ENV, NODE_ENV: 'test' });
 

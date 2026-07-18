@@ -452,7 +452,7 @@ export default async function adminRoutes(app: FastifyInstance) {
         data: {
           whaleId: whale.id,
           storageKey: stored.key,
-          url: stored.url,
+          url: storage.publicUrl(stored.key),
           side: parsed.data.side,
           quality: parsed.data.quality,
           cropX: parsed.data.cropX ?? null,

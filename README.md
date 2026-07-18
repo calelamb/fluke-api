@@ -67,13 +67,14 @@ All environment input is validated at startup. The process exits with field-spec
 | `WEB_ORIGIN` | No | Comma-separated browser origins allowed by CORS. |
 | `API_PUBLIC_ORIGIN` | No | Public API origin used to create absolute photo URLs. |
 | `IDENTIFIER_SERVICE_URL` | No | Base URL for the separate identifier service. |
-| `STORAGE_BACKEND` | No | `local` or `r2`; defaults to `local`. |
+| `STORAGE_BACKEND` | No | `local` or `s3`; defaults to `local`. Production requires `s3`. |
 | `UPLOADS_DIR` | No | Local upload directory; defaults to `uploads` in source. The container sets `/app/uploads`. |
-| `R2_BUCKET` | For R2 | R2 bucket name. |
-| `R2_ENDPOINT` | For R2 | R2 S3-compatible endpoint. |
-| `R2_ACCESS_KEY_ID` | For R2 | R2 access key ID. |
-| `R2_SECRET_ACCESS_KEY` | For R2 | R2 secret access key. |
-| `R2_PUBLIC_HOST` | For R2 | Public origin for stored objects. |
+| `OBJECT_STORAGE_BUCKET` | For S3 | Private S3-compatible bucket name. |
+| `OBJECT_STORAGE_REGION` | For S3 | S3-compatible region. |
+| `OBJECT_STORAGE_ENDPOINT` | For S3 | Public HTTPS S3-compatible endpoint without a path, query, or credentials. |
+| `OBJECT_STORAGE_ACCESS_KEY_ID` | For S3 | Least-privilege access key ID. |
+| `OBJECT_STORAGE_SECRET_ACCESS_KEY` | For S3 | Least-privilege secret access key. |
+| `OBJECT_STORAGE_FORCE_PATH_STYLE` | For S3 | Explicit `true` or `false` path-style selection. |
 
 Never commit `.env` or production credentials. CI uses isolated, synthetic test-only values.
 

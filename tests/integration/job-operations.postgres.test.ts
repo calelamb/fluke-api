@@ -4,6 +4,7 @@ import { PostgresJobLeaseStore } from '../../src/jobs/postgres-job-store.js';
 
 const postgresEnabled = process.env.RUN_POSTGRES_INTEGRATION === 'true';
 const jobName = `integration-job-${randomUUID()}`;
+const immediateReacquireJobName = `integration-reacquire-${randomUUID()}`;
 
 describe.runIf(postgresEnabled)('job operations against PostgreSQL', () => {
   let prisma: typeof import('../../src/db.js')['prisma'];
@@ -16,7 +17,9 @@ describe.runIf(postgresEnabled)('job operations against PostgreSQL', () => {
 
   afterAll(async () => {
     if (prisma) {
-      await prisma.jobLease.deleteMany({ where: { jobName } });
+      await prisma.jobLease.deleteMany({
+        where: { jobName: { in: [jobName, immediateReacquireJobName] } },
+      });
       await prisma.$disconnect();
     }
   });
@@ -74,5 +77,31 @@ describe.runIf(postgresEnabled)('job operations against PostgreSQL', () => {
       where: { event: 'SUCCEEDED', runId: staleRunId },
     })).resolves.toBe(0);
     await store.release(replacement);
+  });
+
+  it('immediately reacquires every released millisecond-precision lease', async () => {
+    let lease = await store.acquire(immediateReacquireJobName, randomUUID(), randomUUID());
+    expect(lease).not.toBeNull();
+    if (!lease) return;
+
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const released = lease;
+      await store.release(released);
+      await expect(store.runFenced(released, async () => 'stale write')).rejects.toThrow(
+        'lease is no longer current',
+      );
+
+      const replacement = await store.acquire(
+        immediateReacquireJobName,
+        randomUUID(),
+        randomUUID(),
+      );
+      expect(replacement).not.toBeNull();
+      if (!replacement) return;
+      expect(replacement.fence).toBe(released.fence + 1n);
+      lease = replacement;
+    }
+
+    await store.release(lease);
   });
 });

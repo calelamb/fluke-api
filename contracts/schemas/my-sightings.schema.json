@@ -1,0 +1,178 @@
+{
+  "$ref": "#/definitions/MySightings",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "MySightings": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "behaviorNotes": {
+                "anyOf": [
+                  {
+                    "maxLength": 20000,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "createdAt": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "ecotypeGuess": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "RESIDENT",
+                      "BIGGS",
+                      "OFFSHORE",
+                      "UNKNOWN"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "groupSize": {
+                "anyOf": [
+                  {
+                    "maximum": 200,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "id": {
+                "maxLength": 200,
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
+              "latitude": {
+                "maximum": 90,
+                "minimum": -90,
+                "type": "number"
+              },
+              "locationName": {
+                "anyOf": [
+                  {
+                    "maxLength": 20000,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "longitude": {
+                "maximum": 180,
+                "minimum": -180,
+                "type": "number"
+              },
+              "observedAt": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "photoCount": {
+                "maximum": 1000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "rejectionReason": {
+                "anyOf": [
+                  {
+                    "maxLength": 20000,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "status": {
+                "enum": [
+                  "PENDING",
+                  "APPROVED",
+                  "REJECTED"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "behaviorNotes",
+              "createdAt",
+              "ecotypeGuess",
+              "groupSize",
+              "id",
+              "latitude",
+              "locationName",
+              "longitude",
+              "observedAt",
+              "photoCount",
+              "rejectionReason",
+              "status"
+            ],
+            "type": "object"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "hasMore": {
+                  "const": true,
+                  "type": "boolean"
+                },
+                "nextCursor": {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "hasMore",
+                "nextCursor"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "hasMore": {
+                  "const": false,
+                  "type": "boolean"
+                },
+                "nextCursor": {
+                  "type": "null"
+                }
+              },
+              "required": [
+                "hasMore",
+                "nextCursor"
+              ],
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "page"
+      ],
+      "type": "object"
+    }
+  }
+}

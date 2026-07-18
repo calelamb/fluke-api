@@ -19,11 +19,19 @@ import {
 } from './features.js';
 import { boundedDatabaseRead } from './lib/bounded-database-read.js';
 import { assertRequiredMigration } from './ops/migration-readiness.js';
-import { resolveUploadsDir } from './lib/storage.js';
+import { getStorageBackend, resolveUploadsDir } from './lib/storage.js';
+import type { StorageBackend } from './lib/storage.js';
+import { decodeTokenEncryptionKey, TokenCrypto } from './lib/token-crypto.js';
 import { resolveRequestId } from './lib/request-id.js';
 import { classifyError, classifyStatus } from './lib/safe-errors.js';
+import {
+  assertPublicEndpointResolution,
+  type EndpointResolver,
+} from './lib/s3-storage.js';
 import adminRoutes from './routes/admin.js';
 import authRoutes from './routes/auth.js';
+import observerAuthRoutes from './routes/observer-auth.js';
+import observerSightingsRoutes from './routes/observer-sightings.js';
 import capabilitiesRoutes from './routes/capabilities.js';
 import externalSightingsRoutes from './routes/external-sightings.js';
 import healthRoutes, { type ReadinessProbe } from './routes/health.js';
@@ -34,25 +42,103 @@ import sightingPhotosRoutes from './routes/sighting-photos.js';
 import sightingSubmissionRoutes from './routes/sighting-submissions.js';
 import sightingsRoutes from './routes/sightings.js';
 import whalesRoutes from './routes/whales.js';
+import { AppleAuthService } from './services/apple-auth.js';
+
+export interface ObserverAuthDependencies {
+  readonly appleAuth: Pick<
+    AppleAuthService,
+    'exchangeAppleAuthorizationCode' | 'revokeAppleRefreshToken' | 'verifyAppleIdentityToken'
+  >;
+  readonly storage: StorageBackend;
+  readonly tokenCrypto: Pick<TokenCrypto, 'decryptToken' | 'encryptToken'>;
+}
 
 export interface BuildAppOptions {
   readonly features?: FeatureConfig;
   readonly publicReadRateLimitMax?: number;
   readonly publicReadTimeoutMs?: number;
   readonly readinessProbe?: ReadinessProbe;
+  readonly observerAuth?: ObserverAuthDependencies;
+  readonly storageEndpointResolver?: EndpointResolver;
   readonly silent?: boolean;
-  readonly trustProxy?: false | number;
+  readonly trustProxy?: false | 1;
 }
 
 const READINESS_TIMEOUT_MS = 5_000;
 const PUBLIC_READ_RATE_LIMIT_MAX = 120;
 const PUBLIC_READ_TIMEOUT_MS = 5_000;
+const STORAGE_OPERATIONS = new Set(['delete', 'presign', 'put']);
+
+function environmentObserverAuthDependencies(): ObserverAuthDependencies | undefined {
+  if (
+    env.APPLE_CLIENT_ID === undefined
+    || env.APPLE_TEAM_ID === undefined
+    || env.APPLE_KEY_ID === undefined
+    || env.APPLE_PRIVATE_KEY === undefined
+    || env.APPLE_TOKEN_ENCRYPTION_KEY === undefined
+  ) {
+    return undefined;
+  }
+
+  const tokenCrypto = new TokenCrypto(decodeTokenEncryptionKey(env.APPLE_TOKEN_ENCRYPTION_KEY));
+  return Object.freeze({
+    appleAuth: new AppleAuthService({
+      clientId: env.APPLE_CLIENT_ID,
+      keyId: env.APPLE_KEY_ID,
+      privateKeyPem: env.APPLE_PRIVATE_KEY,
+      teamId: env.APPLE_TEAM_ID,
+    }),
+    storage: getStorageBackend(),
+    tokenCrypto,
+  });
+}
+
+interface ErrorDiagnosticContext {
+  readonly kind: string;
+  readonly requestId: string;
+  readonly statusCode: number;
+}
+
+export function safeErrorDiagnostics(
+  error: unknown,
+  context: ErrorDiagnosticContext,
+): Readonly<Record<string, unknown>> {
+  if (typeof error === 'object' && error !== null) {
+    const candidate = error as { readonly failureKind?: unknown; readonly operation?: unknown };
+    if (
+      candidate.failureKind === 'object-storage'
+      && typeof candidate.operation === 'string'
+      && STORAGE_OPERATIONS.has(candidate.operation)
+    ) {
+      return Object.freeze({
+        failureKind: 'object-storage',
+        operation: candidate.operation,
+        requestId: context.requestId,
+        statusCode: context.statusCode,
+      });
+    }
+  }
+  return Object.freeze({
+    err: error,
+    failureKind: context.kind,
+    requestId: context.requestId,
+    statusCode: context.statusCode,
+  });
+}
 
 function positiveInteger(value: number, name: string): number {
   if (!Number.isInteger(value) || value <= 0) {
     throw new Error(`${name} must be a positive integer`);
   }
   return value;
+}
+
+function resolveTrustProxy(value: unknown): false | 1 {
+  const resolved = value ?? (isProduction ? 1 : false);
+  if (resolved !== false && resolved !== 1) {
+    throw new Error('trustProxy must be false or exactly one trusted proxy hop');
+  }
+  return resolved;
 }
 
 function isCanonicalSerializedError(payload: unknown, requestId: string): boolean {
@@ -86,8 +172,12 @@ async function defaultReadinessProbe(): Promise<void> {
 }
 
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
+  const resolvedFeatures = validateFeatureConfig(options.features ?? environmentFeatures);
+  const environmentObserverAuth = options.observerAuth === undefined && resolvedFeatures.accounts
+    ? environmentObserverAuthDependencies()
+    : undefined;
   const resolvedOptions = Object.freeze({
-    features: validateFeatureConfig(options.features ?? environmentFeatures),
+    features: resolvedFeatures,
     publicReadRateLimitMax: positiveInteger(
       options.publicReadRateLimitMax ?? PUBLIC_READ_RATE_LIMIT_MAX,
       'publicReadRateLimitMax',
@@ -97,9 +187,25 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       'publicReadTimeoutMs',
     ),
     readinessProbe: options.readinessProbe ?? defaultReadinessProbe,
+    observerAuth: options.observerAuth ?? environmentObserverAuth,
+    storageEndpointResolver: options.storageEndpointResolver,
     silent: options.silent ?? false,
-    trustProxy: options.trustProxy ?? (isProduction ? 1 : false),
+    // Production is bound to exactly one trusted reverse-proxy hop. Never
+    // trust an arbitrary X-Forwarded-For chain.
+    trustProxy: resolveTrustProxy(options.trustProxy),
   });
+  if (isProduction && resolvedOptions.features.accounts && resolvedOptions.observerAuth === undefined) {
+    throw new Error('Production observer accounts require configured authentication dependencies');
+  }
+  const requiresObjectStorage = resolvedOptions.features.accounts
+    || resolvedOptions.features.identification
+    || resolvedOptions.features.submissions;
+  if (requiresObjectStorage && env.STORAGE_BACKEND === 's3') {
+    await assertPublicEndpointResolution(
+      env.OBJECT_STORAGE_ENDPOINT!,
+      resolvedOptions.storageEndpointResolver,
+    );
+  }
   const app = Fastify({
     forceCloseConnections: 'idle',
     genReqId: (request) => resolveRequestId(request.headers['x-request-id']),
@@ -185,12 +291,11 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   });
   app.setErrorHandler(async (error, request, reply) => {
     const failure = classifyError(error, request.id);
-    const diagnostics = {
-      err: error,
-      failureKind: failure.kind,
+    const diagnostics = safeErrorDiagnostics(error, {
+      kind: failure.kind,
       requestId: request.id,
       statusCode: failure.statusCode,
-    };
+    });
     if (failure.statusCode >= 500) {
       request.log.error(diagnostics, 'request failed');
     } else {
@@ -273,9 +378,13 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     await app.register(sightingSubmissionRoutes, { prefix: '/api/v1' });
   }
   if (resolvedOptions.features.submissions || resolvedOptions.features.accounts) {
+    const injectedStorage = resolvedOptions.observerAuth?.storage;
     await app.register(sightingPhotosRoutes, {
       prefix: '/api/v1',
       accounts: resolvedOptions.features.accounts,
+      storage: injectedStorage === undefined
+        ? getStorageBackend
+        : () => injectedStorage,
       submissions: resolvedOptions.features.submissions,
     });
   }
@@ -283,7 +392,17 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     await app.register(identifyRoutes, { prefix: '/api/v1' });
   }
   if (resolvedOptions.features.accounts) {
-    await app.register(authRoutes, { prefix: '/api/v1/auth' });
+    await app.register(observerSightingsRoutes, { prefix: '/api/v1' });
+    await app.register(authRoutes, {
+      includeSessionRoutes: resolvedOptions.observerAuth === undefined,
+      prefix: '/api/v1/auth',
+    });
+    if (resolvedOptions.observerAuth !== undefined) {
+      await app.register(observerAuthRoutes, {
+        ...resolvedOptions.observerAuth,
+        prefix: '/api/v1/auth',
+      });
+    }
     await app.register(adminRoutes, { prefix: '/api/v1/admin' });
   }
 

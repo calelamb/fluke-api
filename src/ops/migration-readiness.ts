@@ -1,4 +1,4 @@
-export const REQUIRED_MIGRATION = '20260716220000_add_job_operations' as const;
+export const REQUIRED_MIGRATION = '20260717183000_bound_sighting_photo_order' as const;
 
 interface MigrationStatusRow {
   readonly requiredApplied: boolean;

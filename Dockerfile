@@ -23,4 +23,7 @@ COPY --from=build --chown=node:node /app/prisma ./prisma
 RUN mkdir -p /app/uploads && chown node:node /app/uploads
 USER node
 EXPOSE 4000
+STOPSIGNAL SIGTERM
+HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:4000/api/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
 CMD ["node", "dist/src/index.js"]

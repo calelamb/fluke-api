@@ -102,4 +102,25 @@ describe('HTTP production hardening', () => {
 
     expect(response.json()).toEqual({ ip: '10.0.0.4' });
   });
+
+  it('keeps identification unregistered and never reflects supplied credentials', async () => {
+    const app = await createApp();
+    const credential = 'Bearer private-observer-credential-material';
+
+    const response = await app.inject({
+      headers: {
+        authorization: credential,
+        cookie: 'fluke_observer=malformed-private-session',
+      },
+      method: 'POST',
+      payload: { image: 'private-image-data' },
+      url: '/api/v1/identify',
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toMatchObject({ code: 'NOT_FOUND', requestId: expect.any(String) });
+    expect(response.body).not.toContain(credential);
+    expect(response.body).not.toContain('malformed-private-session');
+    expect(response.body).not.toContain('private-image-data');
+  });
 });

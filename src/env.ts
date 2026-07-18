@@ -1,13 +1,73 @@
 import ipaddr from 'ipaddr.js';
+import { createPrivateKey } from 'node:crypto';
 import { z } from 'zod';
+import { objectStorageEndpointIssue } from './lib/storage-endpoint.js';
 
 const DEVELOPMENT_WEB_ORIGINS = 'http://localhost:5174,http://localhost:5173';
 const DEVELOPMENT_API_ORIGIN = 'http://localhost:4000';
+const FIXED_OBSERVER_COOKIE_NAMES = new Set(['fluke_observer', 'fluke_csrf']);
+const RFC_COOKIE_TOKEN_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u;
+const STANDARD_BASE64_PATTERN = /^[A-Za-z0-9+/]+={1,2}$/u;
+
+const adminCookieName = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(RFC_COOKIE_TOKEN_PATTERN, 'must be an RFC cookie-token-safe name')
+  .refine(
+    (value) => !FIXED_OBSERVER_COOKIE_NAMES.has(value),
+    'must not collide with a fixed observer cookie name',
+  )
+  .refine(
+    (value) => !value.startsWith('__Host-') && !value.startsWith('__Secure-'),
+    'must not use a security prefix because local non-TLS development cannot honor it',
+  );
 
 const featureFlag = z
   .enum(['true', 'false'])
   .default('false')
   .transform((value) => value === 'true');
+
+const tokenEncryptionKey = z.string().refine((value) => {
+  if (!STANDARD_BASE64_PATTERN.test(value) || value.length % 4 !== 0) {
+    return false;
+  }
+  const decoded = Buffer.from(value, 'base64');
+  return decoded.length === 32 && decoded.toString('base64') === value;
+}, 'must be a standard padded base64 encoding of exactly 32 bytes');
+
+function hasExactPkcs8PemBoundary(value: string): boolean {
+  if (/\r(?!\n)/u.test(value)) {
+    return false;
+  }
+  const splitLines = value.split(/\r?\n/u);
+  const lines = splitLines.at(-1) === '' ? splitLines.slice(0, -1) : splitLines;
+  if (
+    lines[0] !== '-----BEGIN PRIVATE KEY-----'
+    || lines.at(-1) !== '-----END PRIVATE KEY-----'
+  ) {
+    return false;
+  }
+  const bodyLines = lines.slice(1, -1);
+  if (bodyLines.length === 0 || bodyLines.some((line) => !/^[A-Za-z0-9+/]+={0,2}$/u.test(line))) {
+    return false;
+  }
+  const body = bodyLines.join('');
+  return Buffer.from(body, 'base64').toString('base64') === body;
+}
+
+const applePrivateKey = z.string().max(16_384).refine((value) => {
+  if (!hasExactPkcs8PemBoundary(value)) {
+    return false;
+  }
+  try {
+    const key = createPrivateKey({ format: 'pem', key: value, type: 'pkcs8' });
+    return key.asymmetricKeyType === 'ec'
+      && key.asymmetricKeyDetails?.namedCurve === 'prime256v1';
+  } catch {
+    return false;
+  }
+}, 'must be an unencrypted PKCS#8 EC P-256 private key for ES256');
 
 const originList = z
   .string()
@@ -27,16 +87,24 @@ const envSchema = z
     DIRECT_URL: z.string().startsWith('postgresql://'),
     PORT: z.coerce.number().int().positive().default(4000),
     JWT_SECRET: z.string().min(32),
-    ADMIN_COOKIE_NAME: z.string().min(1).default('fluke_admin'),
+    ADMIN_COOKIE_NAME: adminCookieName.default('fluke_admin'),
     WEB_ORIGIN: originList.default(DEVELOPMENT_WEB_ORIGINS),
     ENABLE_SUBMISSIONS: featureFlag,
     ENABLE_ACCOUNTS: featureFlag,
     ENABLE_IDENTIFY: featureFlag,
+    PRODUCTION_MUTATIONS_ACK: featureFlag,
 
-    // Photo storage backend. 'local' writes to apps/api/uploads/ and the API
-    // serves them statically; 'r2' is reserved for the R2 adapter (stubbed
-    // in src/lib/storage.ts) and requires the R2_* env vars below.
-    STORAGE_BACKEND: z.enum(['local', 'r2']).default('local'),
+    APPLE_CLIENT_ID: z.literal('app.fluke.Fluke').optional(),
+    APPLE_TEAM_ID: z.literal('86RBV2JZ8F').optional(),
+    APPLE_KEY_ID: z.string().regex(/^[A-Z0-9]{10}$/u).optional(),
+    APPLE_PRIVATE_KEY: applePrivateKey.optional(),
+    APPLE_TOKEN_ENCRYPTION_KEY: tokenEncryptionKey.optional(),
+    OBSERVER_JWT_SECRET: z.string().min(43).optional(),
+    OBSERVER_CSRF_SECRET: z.string().min(43).optional(),
+
+    // Local storage is restricted to development/test. Production mutation
+    // processes must select the private S3-compatible adapter.
+    STORAGE_BACKEND: z.enum(['local', 's3']).default('local'),
     UPLOADS_DIR: z.string().min(1).default('uploads'),
     /**
      * Absolute origin the API is reachable at, used to build absolute photo
@@ -46,21 +114,81 @@ const envSchema = z
     API_PUBLIC_ORIGIN: z.string().url().default(DEVELOPMENT_API_ORIGIN),
     IDENTIFIER_SERVICE_URL: z.string().url().default('http://localhost:4100'),
 
-    R2_BUCKET: z.string().optional(),
-    R2_ENDPOINT: z.string().url().optional(),
-    R2_ACCESS_KEY_ID: z.string().optional(),
-    R2_SECRET_ACCESS_KEY: z.string().optional(),
-    R2_PUBLIC_HOST: z.string().url().optional(),
+    OBJECT_STORAGE_BUCKET: z.string().min(3).max(63).optional(),
+    OBJECT_STORAGE_REGION: z.string().min(1).max(64).optional(),
+    OBJECT_STORAGE_ENDPOINT: z.string().url().optional(),
+    OBJECT_STORAGE_ACCESS_KEY_ID: z.string().min(1).max(256).optional(),
+    OBJECT_STORAGE_SECRET_ACCESS_KEY: z.string().min(1).max(1_024).optional(),
+    OBJECT_STORAGE_FORCE_PATH_STYLE: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((value) => value === 'true'),
   })
   .superRefine((value, ctx) => {
-    if (value.STORAGE_BACKEND === 'r2') {
-      const required = ['R2_BUCKET', 'R2_ENDPOINT', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_PUBLIC_HOST'] as const;
-      for (const key of required) {
-        if (!value[key]) {
+    const appleKeys = [
+      'APPLE_CLIENT_ID',
+      'APPLE_TEAM_ID',
+      'APPLE_KEY_ID',
+      'APPLE_PRIVATE_KEY',
+      'APPLE_TOKEN_ENCRYPTION_KEY',
+    ] as const;
+    const configuredAppleValues = appleKeys.filter((key) => value[key] !== undefined);
+    if (configuredAppleValues.length > 0 && configuredAppleValues.length < appleKeys.length) {
+      for (const key of appleKeys) {
+        if (value[key] === undefined) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             path: [key],
-            message: `STORAGE_BACKEND=r2 requires ${key}`,
+            message: 'APPLE_* values must be configured all-or-none',
+          });
+        }
+      }
+    }
+    const observerKeys = ['OBSERVER_JWT_SECRET', 'OBSERVER_CSRF_SECRET'] as const;
+    const configuredObserverValues = observerKeys.filter((key) => value[key] !== undefined);
+    if (configuredObserverValues.length > 0 && configuredObserverValues.length < observerKeys.length) {
+      for (const key of observerKeys) {
+        if (value[key] === undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [key],
+            message: 'OBSERVER_* values must be configured all-or-none',
+          });
+        }
+      }
+    }
+    const storageKeys = [
+      'OBJECT_STORAGE_BUCKET',
+      'OBJECT_STORAGE_REGION',
+      'OBJECT_STORAGE_ENDPOINT',
+      'OBJECT_STORAGE_ACCESS_KEY_ID',
+      'OBJECT_STORAGE_SECRET_ACCESS_KEY',
+    ] as const;
+    const configuredStorageValues = storageKeys.filter((key) => value[key] !== undefined);
+    if (configuredStorageValues.length > 0 && configuredStorageValues.length < storageKeys.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['OBJECT_STORAGE'],
+        message: 'OBJECT_STORAGE_* values must be configured all-or-none',
+      });
+    }
+    if (value.STORAGE_BACKEND === 's3') {
+      for (const key of storageKeys) {
+        if (value[key] === undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [key],
+            message: `STORAGE_BACKEND=s3 requires ${key}`,
+          });
+        }
+      }
+      if (value.OBJECT_STORAGE_ENDPOINT) {
+        const issue = objectStorageEndpointIssue(value.OBJECT_STORAGE_ENDPOINT);
+        if (issue) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['OBJECT_STORAGE_ENDPOINT'],
+            message: `object storage endpoint ${issue}`,
           });
         }
       }
@@ -122,6 +250,9 @@ function productionIssues(input: NodeJS.ProcessEnv, parsed: Env): readonly strin
   }
 
   const issues: string[] = [];
+  if (parsed.STORAGE_BACKEND !== 's3') {
+    issues.push('STORAGE_BACKEND: production requires private S3-compatible storage');
+  }
   if (!input.WEB_ORIGIN) {
     issues.push('WEB_ORIGIN: is required explicitly in production');
   } else {
@@ -142,14 +273,45 @@ function productionIssues(input: NodeJS.ProcessEnv, parsed: Env): readonly strin
     }
   }
 
-  const releaseBFlags = [
-    ['ENABLE_ACCOUNTS', parsed.ENABLE_ACCOUNTS],
-    ['ENABLE_IDENTIFY', parsed.ENABLE_IDENTIFY],
-    ['ENABLE_SUBMISSIONS', parsed.ENABLE_SUBMISSIONS],
-  ] as const;
-  for (const [name, enabled] of releaseBFlags) {
-    if (enabled) {
-      issues.push(`${name}: must remain false in production Release A`);
+  if (parsed.ENABLE_IDENTIFY) {
+    issues.push('ENABLE_IDENTIFY: must remain false in production');
+  }
+  if (parsed.ENABLE_ACCOUNTS !== parsed.ENABLE_SUBMISSIONS) {
+    issues.push(
+      'ENABLE_ACCOUNTS/ENABLE_SUBMISSIONS: production mutations must be enabled together',
+    );
+  }
+  if (parsed.PRODUCTION_MUTATIONS_ACK && !parsed.ENABLE_ACCOUNTS && !parsed.ENABLE_SUBMISSIONS) {
+    issues.push(
+      'PRODUCTION_MUTATIONS_ACK: must remain false while production mutations are disabled',
+    );
+  }
+
+  if (parsed.ENABLE_ACCOUNTS && parsed.ENABLE_SUBMISSIONS) {
+    if (!parsed.PRODUCTION_MUTATIONS_ACK) {
+      issues.push('PRODUCTION_MUTATIONS_ACK: must be true for production mutations');
+    }
+    if (parsed.STORAGE_BACKEND !== 's3') {
+      issues.push('STORAGE_BACKEND: production mutations require private S3-compatible storage');
+    }
+    const requiredDependencies = [
+      'APPLE_CLIENT_ID',
+      'APPLE_TEAM_ID',
+      'APPLE_KEY_ID',
+      'APPLE_PRIVATE_KEY',
+      'APPLE_TOKEN_ENCRYPTION_KEY',
+      'OBSERVER_JWT_SECRET',
+      'OBSERVER_CSRF_SECRET',
+      'OBJECT_STORAGE_BUCKET',
+      'OBJECT_STORAGE_REGION',
+      'OBJECT_STORAGE_ENDPOINT',
+      'OBJECT_STORAGE_ACCESS_KEY_ID',
+      'OBJECT_STORAGE_SECRET_ACCESS_KEY',
+    ] as const;
+    for (const key of requiredDependencies) {
+      if (parsed[key] === undefined) {
+        issues.push(`${key}: is required for production mutations`);
+      }
     }
   }
 

@@ -1,0 +1,9 @@
+{
+  "csrfToken": "fixture-csrf-token-value-at-least-thirty-two-characters",
+  "user": {
+    "displayName": "Fixture Observer",
+    "email": "relay@fixtures.invalid",
+    "id": "fixture-observer-1",
+    "role": "OBSERVER"
+  }
+}

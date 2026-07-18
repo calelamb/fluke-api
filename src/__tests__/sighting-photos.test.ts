@@ -1,13 +1,16 @@
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import sharp from 'sharp';
 import FormData from 'form-data';
+import type { StorageBackend } from '../lib/storage.js';
 
-vi.mock('../db.js', () => ({
-  prisma: {
+vi.mock('../db.js', () => {
+  const database = {
+    $executeRaw: vi.fn(),
     user: { findUnique: vi.fn() },
     whale: { findMany: vi.fn(), findUnique: vi.fn() },
     sighting: {
@@ -20,23 +23,41 @@ vi.mock('../db.js', () => ({
       count: vi.fn(),
       create: vi.fn(),
       findMany: vi.fn(),
+      findUnique: vi.fn(),
     },
     sightingWhale: { upsert: vi.fn() },
     auditLog: { create: vi.fn() },
-  },
-}));
+  };
+  return {
+    prisma: {
+      ...database,
+      $transaction: vi.fn(async (callback: (client: typeof database) => unknown) => callback(database)),
+    },
+  };
+});
 
 const { prisma } = await import('../db.js');
 
 let uploadsRoot: string;
+let storageOverride: StorageBackend | null = null;
+
+const resolveOptionalObserver = vi.fn();
+const requireCsrf = vi.fn();
+vi.mock('../lib/observer-auth.js', async () => {
+  const actual = await vi.importActual<typeof import('../lib/observer-auth.js')>('../lib/observer-auth.js');
+  return { ...actual, resolveOptionalObserver };
+});
+vi.mock('../lib/csrf.js', async () => {
+  const actual = await vi.importActual<typeof import('../lib/csrf.js')>('../lib/csrf.js');
+  return { ...actual, requireCsrf };
+});
 
 vi.mock('../lib/storage.js', async () => {
   const actual = await vi.importActual<typeof import('../lib/storage.js')>('../lib/storage.js');
   return {
     ...actual,
     resolveUploadsDir: () => uploadsRoot,
-    getStorageBackend: () =>
-      new actual.LocalDiskBackend({
+    getStorageBackend: () => storageOverride ?? new actual.LocalDiskBackend({
         rootDir: uploadsRoot,
         apiOrigin: 'http://localhost:4000',
       }),
@@ -67,6 +88,7 @@ async function buildPng(): Promise<Buffer> {
 function recentPendingSighting(overrides: Partial<{ id: string; status: string; createdAt: Date }> = {}) {
   return {
     id: 's1',
+    observerUserId: 'observer-1',
     status: 'PENDING',
     createdAt: new Date(Date.now() - 5 * 60 * 1000), // 5 min ago, well within window
     ...overrides,
@@ -91,9 +113,115 @@ describe('POST /api/v1/sightings/:id/photos', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    storageOverride = null;
+    resolveOptionalObserver.mockResolvedValue({ id: 'observer-1', role: 'OBSERVER' });
   });
 
   describe('photo-upload token (offline replay)', () => {
+    it('replays a stable per-photo idempotency key without creating a duplicate', async () => {
+      const clientSubmissionId = 'e0f59404-ded3-4a07-8b3e-247ec89adcf7';
+      const photoSubmissionId = '3c2cb2b4-f5a8-4cd0-bd29-d1cd22632887';
+      const idempotencyKey = `${clientSubmissionId}:${photoSubmissionId}`;
+      vi.mocked(prisma.sighting.findUnique).mockResolvedValue(recentPendingSighting() as never);
+      vi.mocked(prisma.sightingPhoto.count).mockResolvedValue(0);
+      vi.mocked(prisma.sightingPhoto.findUnique).mockResolvedValue(null);
+      vi.mocked(prisma.sightingPhoto.create).mockResolvedValue({
+        id: 'stable-photo-id', orderIndex: 0, sightingId: 's1',
+        storageKey: 'placeholder', thumbnailUrl: 'stable-thumbnail', url: 'stable-url',
+      } as never);
+      const token = app.jwt.sign(
+        { clientSubmissionId, sightingId: 's1', type: 'photo-upload' },
+        { expiresIn: '24h' },
+      );
+      const png = await buildPng();
+
+      const firstForm = new FormData();
+      firstForm.append('file', png, { filename: 'orca.png', contentType: 'image/png' });
+      const first = await app.inject({
+        headers: {
+          ...firstForm.getHeaders(),
+          'idempotency-key': idempotencyKey,
+          'x-photo-upload-token': token,
+        },
+        method: 'POST', payload: firstForm, url: '/api/v1/sightings/s1/photos',
+      });
+      expect(first.statusCode).toBe(201);
+      const created = first.json<{ id: string; orderIndex: number; thumbnailUrl: string; url: string }>();
+      const createData = vi.mocked(prisma.sightingPhoto.create).mock.calls[0][0].data;
+      expect(createData.storageKey).toContain(createHash('sha256').update(png).digest('hex'));
+      vi.mocked(prisma.sightingPhoto.findUnique).mockResolvedValue({
+        ...created, sightingId: 's1', storageKey: createData.storageKey,
+      } as never);
+
+      const replayForm = new FormData();
+      replayForm.append('file', png, { filename: 'renamed.png', contentType: 'image/png' });
+      const replay = await app.inject({
+        headers: {
+          ...replayForm.getHeaders(),
+          'idempotency-key': idempotencyKey,
+          'x-photo-upload-token': token,
+        },
+        method: 'POST', payload: replayForm, url: '/api/v1/sightings/s1/photos',
+      });
+
+      expect(replay.statusCode).toBe(200);
+      expect(replay.json()).toEqual(created);
+      expect(prisma.sightingPhoto.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects a photo key that is not scoped to the token submission', async () => {
+      const token = app.jwt.sign({
+        clientSubmissionId: 'e0f59404-ded3-4a07-8b3e-247ec89adcf7',
+        sightingId: 's1', type: 'photo-upload',
+      }, { expiresIn: '24h' });
+      vi.mocked(prisma.sighting.findUnique).mockResolvedValue(recentPendingSighting() as never);
+      const form = new FormData();
+      form.append('file', await buildPng(), { filename: 'orca.png', contentType: 'image/png' });
+
+      const response = await app.inject({
+        headers: {
+          ...form.getHeaders(),
+          'idempotency-key': '6456556d-60f6-460f-a90d-8567eb2c4cde:3c2cb2b4-f5a8-4cd0-bd29-d1cd22632887',
+          'x-photo-upload-token': token,
+        },
+        method: 'POST', payload: form, url: '/api/v1/sightings/s1/photos',
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(prisma.sightingPhoto.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects changed bytes for the same photo idempotency key', async () => {
+      const clientSubmissionId = 'e0f59404-ded3-4a07-8b3e-247ec89adcf7';
+      const idempotencyKey = `${clientSubmissionId}:3c2cb2b4-f5a8-4cd0-bd29-d1cd22632887`;
+      const token = app.jwt.sign(
+        { clientSubmissionId, sightingId: 's1', type: 'photo-upload' },
+        { expiresIn: '24h' },
+      );
+      vi.mocked(prisma.sighting.findUnique).mockResolvedValue(recentPendingSighting() as never);
+      vi.mocked(prisma.sightingPhoto.findUnique).mockResolvedValue({
+        id: 'existing', orderIndex: 0, sightingId: 's1',
+        storageKey: `sightings/s1/${'a'.repeat(64)}-stable-1024.webp`,
+        thumbnailUrl: 'thumb', url: 'url',
+      } as never);
+      const changed = await sharp({
+        create: { width: 64, height: 48, channels: 3, background: '#ffffff' },
+      }).png().toBuffer();
+      const form = new FormData();
+      form.append('file', changed, { filename: 'changed.png', contentType: 'image/png' });
+
+      const response = await app.inject({
+        headers: {
+          ...form.getHeaders(), 'idempotency-key': idempotencyKey,
+          'x-photo-upload-token': token,
+        },
+        method: 'POST', payload: form, url: '/api/v1/sightings/s1/photos',
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(prisma.sightingPhoto.create).not.toHaveBeenCalled();
+    });
+
     it('allows public upload past the 30-min window when a valid token is supplied', async () => {
       vi.mocked(prisma.sighting.findUnique).mockResolvedValue(
         recentPendingSighting({
@@ -206,8 +334,9 @@ describe('POST /api/v1/sightings/:id/photos', () => {
     });
   });
 
-  describe('public unauthenticated upload', () => {
-    it('accepts a photo on a recent PENDING sighting (within 30-min window)', async () => {
+  describe('observer-owned upload', () => {
+    it('rejects anonymous upload even within the former public window', async () => {
+      resolveOptionalObserver.mockResolvedValue(null);
       vi.mocked(prisma.sighting.findUnique).mockResolvedValue(recentPendingSighting() as never);
       vi.mocked(prisma.sightingPhoto.count).mockResolvedValue(0);
       vi.mocked(prisma.sightingPhoto.create).mockResolvedValue({
@@ -228,9 +357,99 @@ describe('POST /api/v1/sightings/:id/photos', () => {
         headers: form.getHeaders(),
       });
 
+      expect(response.statusCode).toBe(403);
+      expect(prisma.sightingPhoto.create).not.toHaveBeenCalled();
+    });
+
+    it('allows the observer owner with CSRF and no upload token', async () => {
+      resolveOptionalObserver.mockResolvedValue({ id: 'observer-1', role: 'OBSERVER' });
+      vi.mocked(prisma.sighting.findUnique).mockResolvedValue({
+        ...recentPendingSighting(), observerUserId: 'observer-1',
+      } as never);
+      vi.mocked(prisma.sightingPhoto.count).mockResolvedValue(0);
+      vi.mocked(prisma.sightingPhoto.create).mockResolvedValue({
+        id: 'owned-photo', orderIndex: 0, thumbnailUrl: 'thumb', url: 'url',
+      } as never);
+      const form = new FormData();
+      form.append('file', await buildPng(), { filename: 'owned.png', contentType: 'image/png' });
+
+      const response = await app.inject({
+        headers: form.getHeaders(), method: 'POST', payload: form,
+        url: '/api/v1/sightings/s1/photos',
+      });
+
       expect(response.statusCode).toBe(201);
-      // No audit log for public uploads.
-      expect(prisma.auditLog.create).not.toHaveBeenCalled();
+      expect(requireCsrf).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects a different observer and does not invoke CSRF', async () => {
+      resolveOptionalObserver.mockResolvedValue({ id: 'observer-2', role: 'OBSERVER' });
+      vi.mocked(prisma.sighting.findUnique).mockResolvedValue({
+        ...recentPendingSighting(), observerUserId: 'observer-1',
+      } as never);
+      const form = new FormData();
+      form.append('file', await buildPng(), { filename: 'cross-owner.png', contentType: 'image/png' });
+
+      const response = await app.inject({
+        headers: form.getHeaders(), method: 'POST', payload: form,
+        url: '/api/v1/sightings/s1/photos',
+      });
+
+      expect(response.statusCode).toBe(403);
+      expect(requireCsrf).not.toHaveBeenCalled();
+      expect(prisma.sightingPhoto.create).not.toHaveBeenCalled();
+    });
+
+    it('fails closed on a present invalid observer cookie', async () => {
+      const { ObserverAuthError } = await import('../lib/observer-auth.js');
+      resolveOptionalObserver.mockRejectedValue(new ObserverAuthError());
+      const form = new FormData();
+      form.append('file', await buildPng(), { filename: 'invalid.png', contentType: 'image/png' });
+
+      const response = await app.inject({
+        headers: { ...form.getHeaders(), cookie: 'fluke_observer=invalid' },
+        method: 'POST', payload: form, url: '/api/v1/sightings/s1/photos',
+      });
+
+      expect(response.statusCode).toBe(401);
+      expect(prisma.sighting.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('compensates stored objects when the database transaction fails to commit', async () => {
+      const remove = vi.fn().mockResolvedValue(undefined);
+      storageOverride = {
+        publicUrl: vi.fn(() => 'private'), put: vi.fn(async ({ filename, prefix, body }) => ({
+          key: `${prefix}/${filename}`, size: Buffer.isBuffer(body) ? body.byteLength : 1,
+        })), remove,
+      };
+      const clientSubmissionId = 'e0f59404-ded3-4a07-8b3e-247ec89adcf7';
+      const token = app.jwt.sign(
+        { clientSubmissionId, sightingId: 's1', type: 'photo-upload' }, { expiresIn: '24h' },
+      );
+      vi.mocked(prisma.sighting.findUnique).mockResolvedValue(recentPendingSighting() as never);
+      vi.mocked(prisma.sightingPhoto.findUnique).mockResolvedValue(null);
+      vi.mocked(prisma.sightingPhoto.count).mockResolvedValue(0);
+      vi.mocked(prisma.sightingPhoto.create).mockResolvedValue({
+        id: 'commit-failure', orderIndex: 0, thumbnailUrl: 'thumb', url: 'url',
+      } as never);
+      vi.mocked(prisma.$transaction).mockImplementationOnce(async (callback) => {
+        await callback(prisma as never);
+        throw new Error('commit failed');
+      });
+      const form = new FormData();
+      form.append('file', await buildPng(), { filename: 'commit.png', contentType: 'image/png' });
+
+      const response = await app.inject({
+        headers: {
+          ...form.getHeaders(),
+          'idempotency-key': `${clientSubmissionId}:3c2cb2b4-f5a8-4cd0-bd29-d1cd22632887`,
+          'x-photo-upload-token': token,
+        },
+        method: 'POST', payload: form, url: '/api/v1/sightings/s1/photos',
+      });
+
+      expect(response.statusCode).toBe(500);
+      expect(remove).toHaveBeenCalledTimes(2);
     });
 
     it('rejects with 403 when the sighting is APPROVED', async () => {
@@ -254,7 +473,7 @@ describe('POST /api/v1/sightings/:id/photos', () => {
       expect(prisma.sightingPhoto.create).not.toHaveBeenCalled();
     });
 
-    it('rejects with 403 when the sighting is older than the 30-min window', async () => {
+    it('allows the owning observer beyond the removed public time window', async () => {
       vi.mocked(prisma.sighting.findUnique).mockResolvedValue(
         recentPendingSighting({
           createdAt: new Date(Date.now() - 60 * 60 * 1000), // 1 hour ago
@@ -272,12 +491,36 @@ describe('POST /api/v1/sightings/:id/photos', () => {
         headers: form.getHeaders(),
       });
 
-      expect(response.statusCode).toBe(403);
-      expect(response.json<{ code: string }>().code).toBe('FORBIDDEN');
+      expect(response.statusCode).toBe(201);
+      expect(requireCsrf).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('admin upload', () => {
+    it('never treats a photo-upload JWT in the admin cookie as admin authorization', async () => {
+      vi.mocked(prisma.sighting.findUnique).mockResolvedValue({
+        id: 's1',
+        status: 'APPROVED',
+        createdAt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000),
+      } as never);
+      const photoUploadToken = app.jwt.sign(
+        { sightingId: 's1', type: 'photo-upload' },
+        { expiresIn: '24h' },
+      );
+      const form = new FormData();
+      form.append('file', await buildPng(), { filename: 'orca.png', contentType: 'image/png' });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/sightings/s1/photos',
+        payload: form,
+        headers: { ...form.getHeaders(), cookie: `fluke_admin=${photoUploadToken}` },
+      });
+
+      expect(response.statusCode).toBe(403);
+      expect(prisma.sightingPhoto.create).not.toHaveBeenCalled();
+    });
+
     it('accepts a photo with no time window or status restriction', async () => {
       vi.mocked(prisma.sighting.findUnique).mockResolvedValue({
         id: 's1',
@@ -401,9 +644,9 @@ describe('POST /api/v1/sightings/:id/photos', () => {
         data: expect.objectContaining({
           sightingId: 's1',
           orderIndex: 0,
-          url: expect.stringMatching(/^http:\/\/localhost:4000\/uploads\/sightings\/s1\/.+-1024\.webp$/),
+          url: expect.stringMatching(/^http:\/\/localhost:4000\/api\/v1\/media\/[a-f0-9-]+$/),
           thumbnailUrl: expect.stringMatching(
-            /^http:\/\/localhost:4000\/uploads\/sightings\/s1\/.+-256\.webp$/,
+            /^http:\/\/localhost:4000\/api\/v1\/media\/[a-f0-9-]+\?variant=thumbnail$/,
           ),
         }),
       }),
@@ -412,5 +655,159 @@ describe('POST /api/v1/sightings/:id/photos', () => {
     const written = await readdir(path.join(uploadsRoot, 'sightings/s1'));
     expect(written.some((f) => f.endsWith('-1024.webp'))).toBe(true);
     expect(written.some((f) => f.endsWith('-256.webp'))).toBe(true);
+  });
+
+  it('removes the large object if the thumbnail upload fails', async () => {
+    vi.mocked(prisma.sighting.findUnique).mockResolvedValue(recentPendingSighting() as never);
+    vi.mocked(prisma.sightingPhoto.count).mockResolvedValue(0);
+    const remove = vi.fn().mockResolvedValue(undefined);
+    const put = vi.fn()
+      .mockResolvedValueOnce({ key: 'sightings/s1/large-1024.webp', size: 10 })
+      .mockRejectedValueOnce(new Error('storage unavailable'));
+    storageOverride = { put, remove, publicUrl: vi.fn() };
+
+    const form = new FormData();
+    form.append('file', await buildPng(), { filename: 'orca.png', contentType: 'image/png' });
+    const response = await app.inject({
+      method: 'POST', url: '/api/v1/sightings/s1/photos', payload: form, headers: form.getHeaders(),
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(remove).toHaveBeenCalledWith('sightings/s1/large-1024.webp');
+    expect(prisma.sightingPhoto.create).not.toHaveBeenCalled();
+  });
+
+  it('removes both objects if the database write fails', async () => {
+    vi.mocked(prisma.sighting.findUnique).mockResolvedValue(recentPendingSighting() as never);
+    vi.mocked(prisma.sightingPhoto.count).mockResolvedValue(0);
+    vi.mocked(prisma.sightingPhoto.create).mockRejectedValue(new Error('database unavailable'));
+    const remove = vi.fn().mockResolvedValue(undefined);
+    const put = vi.fn()
+      .mockResolvedValueOnce({ key: 'sightings/s1/large-1024.webp', size: 10 })
+      .mockResolvedValueOnce({ key: 'sightings/s1/thumb-256.webp', size: 5 });
+    storageOverride = { put, remove, publicUrl: vi.fn() };
+
+    const form = new FormData();
+    form.append('file', await buildPng(), { filename: 'orca.png', contentType: 'image/png' });
+    const response = await app.inject({
+      method: 'POST', url: '/api/v1/sightings/s1/photos', payload: form, headers: form.getHeaders(),
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(remove).toHaveBeenCalledTimes(2);
+    expect(remove).toHaveBeenCalledWith('sightings/s1/large-1024.webp');
+    expect(remove).toHaveBeenCalledWith('sightings/s1/thumb-256.webp');
+  });
+
+  it('strips source metadata from both persisted WebP variants', async () => {
+    vi.mocked(prisma.sighting.findUnique).mockResolvedValue(recentPendingSighting() as never);
+    vi.mocked(prisma.sightingPhoto.count).mockResolvedValue(0);
+    vi.mocked(prisma.sightingPhoto.create).mockResolvedValue({
+      id: 'photo-1', orderIndex: 0, thumbnailUrl: 'thumb', url: 'large',
+    } as never);
+    const put = vi.fn()
+      .mockResolvedValueOnce({ key: 'sightings/s1/large-1024.webp', size: 10 })
+      .mockResolvedValueOnce({ key: 'sightings/s1/thumb-256.webp', size: 5 });
+    storageOverride = { put, remove: vi.fn(), publicUrl: vi.fn() };
+    const source = await sharp(await buildPng()).withMetadata({ orientation: 6 }).png().toBuffer();
+    const form = new FormData();
+    form.append('file', source, { filename: 'orca.png', contentType: 'image/png' });
+
+    const response = await app.inject({
+      method: 'POST', url: '/api/v1/sightings/s1/photos', payload: form, headers: form.getHeaders(),
+    });
+    expect(response.statusCode).toBe(201);
+    for (const call of put.mock.calls) {
+      const metadata = await sharp(call[0].body as Buffer).metadata();
+      expect(metadata.exif).toBeUndefined();
+      expect(metadata.icc).toBeUndefined();
+      expect(metadata.xmp).toBeUndefined();
+    }
+  });
+
+  it('rejects images over the decoded pixel limit before object storage', async () => {
+    vi.mocked(prisma.sighting.findUnique).mockResolvedValue(recentPendingSighting() as never);
+    vi.mocked(prisma.sightingPhoto.count).mockResolvedValue(0);
+    const put = vi.fn();
+    storageOverride = { put, remove: vi.fn(), publicUrl: vi.fn() };
+    const oversizedPixels = await sharp({
+      create: {
+        width: 8_000,
+        height: 5_001,
+        channels: 3,
+        background: { r: 1, g: 2, b: 3 },
+      },
+    }).png().toBuffer();
+    const form = new FormData();
+    form.append('file', oversizedPixels, { filename: 'huge.png', contentType: 'image/png' });
+
+    const response = await app.inject({
+      method: 'POST', url: '/api/v1/sightings/s1/photos', payload: form, headers: form.getHeaders(),
+    });
+    expect(response.statusCode).toBe(400);
+    expect(put).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /api/v1/media/:photoId', () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    uploadsRoot = await mkdtemp(path.join(tmpdir(), 'fluke-media-test-'));
+    app = await buildApp({ silent: true });
+    await app.ready();
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await rm(uploadsRoot, { recursive: true, force: true });
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resolveOptionalObserver.mockResolvedValue(null);
+    storageOverride = {
+      put: vi.fn(),
+      publicUrl: vi.fn(),
+      remove: vi.fn(),
+      signedReadUrl: vi.fn().mockResolvedValue('https://signed.example/photo'),
+    };
+  });
+
+  it('redirects anonymous readers to a short-lived URL for approved media', async () => {
+    vi.mocked(prisma.sightingPhoto.findUnique).mockResolvedValue({
+      id: 'photo-1',
+      storageKey: 'sightings/s1/photo-1024.webp',
+      sighting: { observerUserId: 'observer-1', status: 'APPROVED' },
+    } as never);
+    const response = await app.inject({ method: 'GET', url: '/api/v1/media/photo-1' });
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe('https://signed.example/photo');
+  });
+
+  it('returns 403 when a different observer requests pending media', async () => {
+    resolveOptionalObserver.mockResolvedValue({ id: 'observer-2', role: 'OBSERVER' });
+    vi.mocked(prisma.sightingPhoto.findUnique).mockResolvedValue({
+      id: 'photo-1',
+      storageKey: 'sightings/s1/photo-1024.webp',
+      sighting: { observerUserId: 'observer-1', status: 'PENDING' },
+    } as never);
+    const response = await app.inject({ method: 'GET', url: '/api/v1/media/photo-1' });
+    expect(response.statusCode).toBe(403);
+    expect(storageOverride?.signedReadUrl).not.toHaveBeenCalled();
+  });
+
+  it('uses the derived private thumbnail key for an owning observer', async () => {
+    resolveOptionalObserver.mockResolvedValue({ id: 'observer-1', role: 'OBSERVER' });
+    vi.mocked(prisma.sightingPhoto.findUnique).mockResolvedValue({
+      id: 'photo-1',
+      storageKey: 'sightings/s1/photo-1024.webp',
+      sighting: { observerUserId: 'observer-1', status: 'PENDING' },
+    } as never);
+    const response = await app.inject({
+      method: 'GET', url: '/api/v1/media/photo-1?variant=thumbnail',
+    });
+    expect(response.statusCode).toBe(302);
+    expect(storageOverride?.signedReadUrl).toHaveBeenCalledWith('sightings/s1/photo-256.webp');
   });
 });

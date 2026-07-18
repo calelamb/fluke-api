@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import { SafeErrorSchema, SightingPageSchema } from '../contracts/index.js';
+import { SafeErrorSchema, SightingPageSchema, SubmitSightingPayloadSchema } from '../contracts/index.js';
 
 vi.mock('../db.js', () => {
   const transaction = {
@@ -16,6 +16,10 @@ vi.mock('../db.js', () => {
       update: vi.fn(),
     },
     sightingWhale: { upsert: vi.fn() },
+    submissionIdempotency: {
+      create: vi.fn(),
+      findUnique: vi.fn(),
+    },
     auditLog: { create: vi.fn() },
   };
   return {
@@ -25,6 +29,17 @@ vi.mock('../db.js', () => {
         callback(transaction)),
     },
   };
+});
+
+const resolveOptionalObserver = vi.fn();
+const requireCsrf = vi.fn();
+vi.mock('../lib/observer-auth.js', async () => {
+  const actual = await vi.importActual<typeof import('../lib/observer-auth.js')>('../lib/observer-auth.js');
+  return { ...actual, resolveOptionalObserver };
+});
+vi.mock('../lib/csrf.js', async () => {
+  const actual = await vi.importActual<typeof import('../lib/csrf.js')>('../lib/csrf.js');
+  return { ...actual, requireCsrf };
 });
 
 const { prisma } = await import('../db.js');
@@ -44,6 +59,7 @@ describe('sightings routes', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    resolveOptionalObserver.mockResolvedValue(null);
   });
 
   describe('GET /api/v1/sightings', () => {
@@ -159,6 +175,7 @@ describe('sightings routes', () => {
 
   describe('POST /api/v1/sightings', () => {
     const validBody = {
+      clientSubmissionId: 'e0f59404-ded3-4a07-8b3e-247ec89adcf7',
       observedAt: new Date('2026-04-25T18:00:00Z').toISOString(),
       latitude: 48.5,
       longitude: -123.0,
@@ -172,6 +189,7 @@ describe('sightings routes', () => {
 
     it('creates a new sighting with PENDING status and returns a photo-upload token', async () => {
       vi.mocked(prisma.sighting.create).mockResolvedValue({ id: 'new-sighting-id' } as never);
+      vi.mocked(prisma.submissionIdempotency.findUnique).mockResolvedValue(null);
 
       const response = await app.inject({
         method: 'POST',
@@ -198,11 +216,93 @@ describe('sightings routes', () => {
           }),
         }),
       );
+      expect(prisma.submissionIdempotency.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('replays the original response without creating another sighting', async () => {
+      vi.mocked(prisma.submissionIdempotency.findUnique)
+        .mockResolvedValue({
+          requestHash: 'placeholder',
+          sighting: { id: 'original-sighting' },
+        } as never);
+
+      const { buildSubmissionHashes } = await import('../lib/idempotency.js');
+      const hashes = buildSubmissionHashes(SubmitSightingPayloadSchema.parse(validBody), null);
+      vi.mocked(prisma.submissionIdempotency.findUnique).mockResolvedValue({
+        requestHash: hashes.requestHash,
+        sighting: { id: 'original-sighting' },
+      } as never);
+
+      const response = await app.inject({
+        headers: { 'idempotency-key': validBody.clientSubmissionId },
+        method: 'POST', payload: validBody, url: '/api/v1/sightings',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json<{ id: string }>().id).toBe('original-sighting');
+      expect(prisma.sighting.create).not.toHaveBeenCalled();
+    });
+
+    it('returns 409 for a changed payload with the same idempotency key', async () => {
+      vi.mocked(prisma.submissionIdempotency.findUnique).mockResolvedValue({
+        requestHash: 'different-request-hash',
+        sighting: { id: 'original-sighting' },
+      } as never);
+
+      const response = await app.inject({
+        headers: { 'idempotency-key': validBody.clientSubmissionId },
+        method: 'POST', payload: { ...validBody, latitude: 49 }, url: '/api/v1/sightings',
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json<{ code: string }>().code).toBe('CONFLICT');
+      expect(prisma.sighting.create).not.toHaveBeenCalled();
+    });
+
+    it('retries the full serializable transaction after P2034 with no visible winner', async () => {
+      const transaction = vi.mocked(prisma.$transaction);
+      transaction
+        .mockRejectedValueOnce(Object.assign(new Error('serialization conflict'), { code: 'P2034' }))
+        .mockImplementationOnce(async (callback) => callback(prisma as never) as never);
+      vi.mocked(prisma.submissionIdempotency.findUnique).mockResolvedValue(null);
+      vi.mocked(prisma.sighting.create).mockResolvedValue({ id: 'retry-winner' } as never);
+
+      const response = await app.inject({
+        method: 'POST', payload: validBody, remoteAddress: '127.0.0.21',
+        url: '/api/v1/sightings',
+      });
+
+      expect(response.statusCode).toBe(201);
+      expect(response.json<{ id: string }>().id).toBe('retry-winner');
+      expect(transaction).toHaveBeenCalledTimes(2);
+    });
+
+    it('requires CSRF for an authenticated observer and records ownership', async () => {
+      resolveOptionalObserver.mockResolvedValue({
+        displayName: 'Account Name', email: 'account@example.com', id: 'observer-1',
+        role: 'OBSERVER', sessionVersion: 1,
+      });
+      vi.mocked(prisma.submissionIdempotency.findUnique).mockResolvedValue(null);
+      vi.mocked(prisma.sighting.create).mockResolvedValue({ id: 'owned-sighting' } as never);
+
+      const response = await app.inject({
+        method: 'POST', payload: validBody, url: '/api/v1/sightings',
+      });
+
+      expect(response.statusCode).toBe(201);
+      expect(requireCsrf).toHaveBeenCalledTimes(1);
+      expect(prisma.sighting.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          observerEmail: 'account@example.com', observerName: 'Account Name',
+          observerUserId: 'observer-1',
+        }),
+      }));
     });
 
     it('rejects payloads with an invalid email', async () => {
       const response = await app.inject({
         method: 'POST',
+        remoteAddress: '127.0.0.2',
         url: '/api/v1/sightings',
         payload: { ...validBody, observerEmail: 'not-an-email' },
       });
@@ -214,6 +314,7 @@ describe('sightings routes', () => {
     it('rejects out-of-range coordinates', async () => {
       const response = await app.inject({
         method: 'POST',
+        remoteAddress: '127.0.0.3',
         url: '/api/v1/sightings',
         payload: { ...validBody, latitude: 200 },
       });

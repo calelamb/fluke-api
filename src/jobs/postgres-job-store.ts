@@ -116,7 +116,7 @@ export class PostgresJobLeaseStore implements JobLeaseStore {
   async release(lease: JobLease): Promise<void> {
     await this.#client.$executeRaw`
       UPDATE "job_leases"
-      SET "lease_expires_at" = CURRENT_TIMESTAMP
+      SET "lease_expires_at" = CURRENT_TIMESTAMP - INTERVAL '1 millisecond'
       WHERE "job_name" = ${lease.jobName}
         AND "run_id" = ${lease.runId}
         AND "owner_token" = ${lease.ownerToken}

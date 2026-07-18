@@ -21,7 +21,7 @@ vi.mock('../src/db.js', () => {
 });
 
 const { prisma } = await import('../src/db.js');
-const { buildApp } = await import('../src/app.js');
+const { buildApp, safeErrorDiagnostics } = await import('../src/app.js');
 
 const RELEASE_A_FEATURES = Object.freeze({
   accounts: false,
@@ -46,6 +46,30 @@ function expectSafeError(body: unknown, expected: Readonly<Record<string, unknow
 }
 
 describe('global safe error boundary', () => {
+  it('logs only redacted operation metadata for object-storage failures', () => {
+    const rawStorageError = Object.assign(new Error(
+      'Authorization=secret sightings/private.webp',
+    ), {
+      failureKind: 'object-storage',
+      name: 'StorageUnavailableError',
+      operation: 'put',
+      statusCode: 503,
+    });
+    const diagnostics = safeErrorDiagnostics(rawStorageError, {
+      kind: 'provider',
+      requestId: 'request-1',
+      statusCode: 503,
+    });
+    expect(diagnostics).toEqual({
+      failureKind: 'object-storage',
+      operation: 'put',
+      requestId: 'request-1',
+      statusCode: 503,
+    });
+    expect(JSON.stringify(diagnostics)).not.toContain('secret');
+    expect(JSON.stringify(diagnostics)).not.toContain('private.webp');
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
   });

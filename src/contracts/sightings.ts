@@ -62,6 +62,7 @@ export const PendingSightingSchema = z.object({
 });
 
 export const SubmitSightingPayloadSchema = z.object({
+  clientSubmissionId: z.string().uuid(),
   observedAt: z.string().datetime(),
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
@@ -71,7 +72,27 @@ export const SubmitSightingPayloadSchema = z.object({
   behaviorNotes: z.string().max(2000).nullable().optional(),
   observerName: z.string().max(120).nullable().optional(),
   observerEmail: z.string().email().max(200),
-});
+}).strict();
+
+export const MySightingSchema = z.object({
+  behaviorNotes: BoundedTextSchema.nullable(),
+  createdAt: IsoDateTimeSchema,
+  ecotypeGuess: EcotypeSchema.nullable(),
+  groupSize: GroupSizeSchema.nullable(),
+  id: StableIdSchema,
+  latitude: LatitudeSchema,
+  locationName: BoundedTextSchema.nullable(),
+  longitude: LongitudeSchema,
+  observedAt: IsoDateTimeSchema,
+  photoCount: z.number().int().min(0).max(MAX_NESTED_ITEMS),
+  rejectionReason: BoundedTextSchema.nullable(),
+  status: SightingStatusSchema,
+}).strict();
+
+export const MySightingPageSchema = z.object({
+  items: z.array(MySightingSchema).max(100),
+  page: PageInfoSchema,
+}).strict();
 
 export const SubmitSightingResponseSchema = z.object({
   ok: z.literal(true),
@@ -169,6 +190,8 @@ export type SightingDTO = z.infer<typeof SightingSchema>;
 export type PendingSightingDTO = z.infer<typeof PendingSightingSchema>;
 export type SubmitSightingPayload = z.infer<typeof SubmitSightingPayloadSchema>;
 export type SubmitSightingResponse = z.infer<typeof SubmitSightingResponseSchema>;
+export type MySighting = z.infer<typeof MySightingSchema>;
+export type MySightingPage = z.infer<typeof MySightingPageSchema>;
 export type ExternalSightingDTO = z.infer<typeof ExternalSightingSchema>;
 export type HistoricalSighting = z.infer<typeof HistoricalSightingSchema>;
 export type SightingPage = z.infer<typeof SightingPageSchema>;

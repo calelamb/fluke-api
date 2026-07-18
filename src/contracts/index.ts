@@ -1,5 +1,6 @@
 export * from './admin.js';
 export * from './atlas.js';
+export * from './auth.js';
 export * from './common.js';
 export * from './identify.js';
 export * from './meta.js';

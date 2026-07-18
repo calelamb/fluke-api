@@ -2,7 +2,11 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { LocalDiskBackend, buildPhotoFilename } from '../lib/storage.js';
+import {
+  LocalDiskBackend,
+  buildPhotoFilename,
+  createStorageBackend,
+} from '../lib/storage.js';
 
 describe('LocalDiskBackend', () => {
   let rootDir: string;
@@ -29,7 +33,9 @@ describe('LocalDiskBackend', () => {
     });
 
     expect(result.key).toBe('sightings/abc/photo.webp');
-    expect(result.url).toBe('http://localhost:4000/uploads/sightings/abc/photo.webp');
+    expect(backend.publicUrl(result.key)).toBe(
+      'http://localhost:4000/uploads/sightings/abc/photo.webp',
+    );
     expect(result.size).toBe(11);
 
     const written = await readFile(path.join(rootDir, result.key));
@@ -59,6 +65,12 @@ describe('LocalDiskBackend', () => {
   it('remove() is idempotent for missing keys', async () => {
     const backend = new LocalDiskBackend({ rootDir, apiOrigin: 'http://x' });
     await expect(backend.remove('does/not/exist.webp')).resolves.toBeUndefined();
+  });
+
+  it('rejects unsafe keys before delete or URL resolution', async () => {
+    const backend = new LocalDiskBackend({ rootDir, apiOrigin: 'http://x' });
+    await expect(backend.remove('../outside.webp')).rejects.toThrow(/Invalid storage/);
+    expect(() => backend.publicUrl('../outside.webp')).toThrow(/Invalid storage/);
   });
 
   it('publicUrl is stable for a given key', () => {
@@ -92,5 +104,25 @@ describe('buildPhotoFilename', () => {
     expect(a).not.toBe(b);
     // hash prefix is identical for identical content
     expect(a.split('-')[0]).toBe(b.split('-')[0]);
+  });
+});
+
+describe('createStorageBackend', () => {
+  it('keeps local disk available in development and test', () => {
+    expect(createStorageBackend({
+      apiOrigin: 'http://localhost:4000',
+      backend: 'local',
+      nodeEnv: 'test',
+      rootDir: '/tmp/fluke-storage-test',
+    })).toBeInstanceOf(LocalDiskBackend);
+  });
+
+  it('fails closed if production is configured with local disk', () => {
+    expect(() => createStorageBackend({
+      apiOrigin: 'https://api.fluke.example',
+      backend: 'local',
+      nodeEnv: 'production',
+      rootDir: '/tmp/fluke-storage-test',
+    })).toThrow(/production.*local/i);
   });
 });

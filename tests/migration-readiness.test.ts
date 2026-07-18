@@ -15,6 +15,10 @@ function clientWithStatus(
 }
 
 describe('assertRequiredMigration', () => {
+  it('requires the observer migration as the readiness marker', () => {
+    expect(REQUIRED_MIGRATION).toBe('20260717183000_bound_sighting_photo_order');
+  });
+
   it('accepts a database with the required migration applied', async () => {
     await expect(assertRequiredMigration(clientWithStatus(true, 0n))).resolves.toBeUndefined();
   });

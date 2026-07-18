@@ -71,13 +71,13 @@ const identifyRoutes: FastifyPluginAsync = async (fastify) => {
     const result = (await serviceResponse.json()) as IdentifierServiceResponse;
     const response: IdentifyResponseDTO = {
       ...result,
-      uploadUrl: stored.url,
+      uploadUrl: storage.publicUrl(stored.key),
     };
 
     await prisma.identificationAttempt.create({
       data: {
         uploadKey: stored.key,
-        uploadUrl: stored.url,
+        uploadUrl: storage.publicUrl(stored.key),
         resultJson: response as unknown as Prisma.InputJsonValue,
       },
     });
