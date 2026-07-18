@@ -105,7 +105,7 @@ describe.runIf(process.env.RUN_S3_INTEGRATION === 'true')('private S3 integratio
       secretAccessKey: process.env.CI_S3_SECRET_ACCESS_KEY ?? '',
     });
     const client = new S3Client({
-      credentials,
+      credentials: async () => ({ ...credentials }),
       endpoint,
       forcePathStyle: true,
       region: process.env.CI_S3_REGION ?? '',
