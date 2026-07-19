@@ -10,7 +10,7 @@ Create two dedicated observer test accounts, Observer A and Observer B. Use uniq
 2. Require `GET /api/v1/capabilities` to return exactly `{"accounts":true,"identification":true,"identificationMode":"on-device","submissions":true}`.
 3. POST `/api/v1/identify` with a bounded harmless request and require canonical `404`. Any Identify route exposure stops certification.
 4. Require `GET /api/v1/identifier/releases/current` and `GET /api/v1/sighting-feed` to return `200` before exercising submissions.
-4. Verify whale and sighting browse routes without an observer cookie.
+5. Verify whale and sighting browse routes without an observer cookie.
 
 ## Apple session lifecycle
 
