@@ -64,6 +64,10 @@ const registration = Object.freeze({
   suggestionsAcceptedUntil: activeRelease.suggestionsAcceptedUntil.toISOString(),
 });
 
+function prismaRace(code: 'P2002' | 'P2034'): Error & { readonly code: string } {
+  return Object.assign(new Error('simulated transaction race'), { code });
+}
+
 function csrfToken(): string {
   const raw = 'r'.repeat(43);
   const signature = createHmac('sha256', CSRF_SECRET).update(raw).digest('base64url');
@@ -214,6 +218,73 @@ describe('identifier release routes', () => {
     }));
     expect(transaction.identifierRelease.create).not.toHaveBeenCalled();
   });
+
+  it('retries a bounded serializable registration after P2034 with no visible winner', async () => {
+    const token = csrfToken();
+    vi.mocked(prisma.$transaction).mockRejectedValueOnce(prismaRace('P2034'));
+    transaction.identifierRelease.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null);
+    transaction.identifierRelease.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ sequence: 1n });
+    transaction.whale.findMany.mockResolvedValue([{ catalogId: 'J35', id: 'whale-j35' }]);
+    transaction.identifierRelease.updateMany.mockResolvedValue({ count: 1 });
+    transaction.identifierRelease.create.mockResolvedValue(activeRelease);
+
+    const response = await app.inject({
+      cookies: { fluke_admin: adminToken, fluke_csrf: token },
+      headers: { 'x-fluke-csrf': token }, method: 'POST', payload: registration,
+      remoteAddress: '127.0.0.31', url: '/api/v1/admin/identifier/releases/accept',
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(prisma.$transaction).toHaveBeenNthCalledWith(2, expect.any(Function), {
+      isolationLevel: 'Serializable', maxWait: expect.any(Number), timeout: expect.any(Number),
+    });
+  });
+
+  it.each(['P2002', 'P2034'] as const)(
+    'maps a %s registration race with a visible winner to conflict',
+    async (code) => {
+      const token = csrfToken();
+      vi.mocked(prisma.$transaction).mockRejectedValueOnce(prismaRace(code));
+      transaction.identifierRelease.findUnique.mockResolvedValueOnce(activeRelease);
+
+      const response = await app.inject({
+        cookies: { fluke_admin: adminToken, fluke_csrf: token },
+        headers: { 'x-fluke-csrf': token }, method: 'POST', payload: registration,
+        remoteAddress: `127.0.0.${code === 'P2002' ? '32' : '33'}`,
+        url: '/api/v1/admin/identifier/releases/accept',
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(transaction.auditLog.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['P2002', 'P2034'] as const)(
+    'returns the terminal revoke winner after a %s race without duplicate audit',
+    async (code) => {
+      const token = csrfToken();
+      vi.mocked(prisma.$transaction).mockRejectedValueOnce(prismaRace(code));
+      transaction.identifierRelease.findUnique.mockResolvedValueOnce({
+        manifestVersion: activeRelease.manifestVersion, status: 'REVOKED',
+      });
+
+      const response = await app.inject({
+        cookies: { fluke_admin: adminToken, fluke_csrf: token },
+        headers: { 'x-fluke-csrf': token }, method: 'POST',
+        remoteAddress: `127.0.0.${code === 'P2002' ? '34' : '35'}`,
+        url: '/api/v1/admin/identifier/releases/manifest-v2/revoke',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ manifestVersion: 'manifest-v2', status: 'REVOKED' });
+      expect(transaction.auditLog.create).not.toHaveBeenCalled();
+    },
+  );
 
   it('rate limits repeated release mutations with a safe error', async () => {
     const responses = [];

@@ -31,6 +31,10 @@ const pending = Object.freeze({
   sightingId: 'sighting-1', status: 'PENDING' as const, whaleId: 'whale-1',
 });
 
+function prismaRace(code: 'P2002' | 'P2034'): Error & { readonly code: string } {
+  return Object.assign(new Error('simulated transaction race'), { code });
+}
+
 function csrfToken(): string {
   const raw = 's'.repeat(43);
   return `${raw}.${createHmac('sha256', CSRF_SECRET).update(raw).digest('base64url')}`;
@@ -144,6 +148,76 @@ describe('identification suggestion moderation', () => {
     });
     expect(response.statusCode).toBe(409);
     expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it.each(['P2002', 'P2034'] as const)(
+    'returns the same terminal winner after a %s race without duplicate effects',
+    async (code) => {
+      const token = csrfToken();
+      vi.mocked(prisma.$transaction).mockRejectedValueOnce(prismaRace(code));
+      transaction.sightingIdentificationSuggestion.findUnique.mockResolvedValueOnce({
+        ...pending, reviewedAt: new Date('2026-07-19T12:00:00.000Z'),
+        reviewedById: MODERATOR.userId, status: 'ACCEPTED',
+      });
+
+      const response = await app.inject({
+        cookies: { fluke_admin: moderatorToken, fluke_csrf: token },
+        headers: { 'x-fluke-csrf': token }, method: 'POST',
+        remoteAddress: `127.0.0.${code === 'P2002' ? '41' : '42'}`,
+        url: '/api/v1/admin/identification-suggestions/suggestion-1/accept',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ id: 'suggestion-1', status: 'ACCEPTED' });
+      expect(transaction.sightingWhale.createMany).not.toHaveBeenCalled();
+      expect(transaction.auditLog.create).not.toHaveBeenCalled();
+      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+        isolationLevel: 'Serializable', maxWait: expect.any(Number), timeout: expect.any(Number),
+      });
+    },
+  );
+
+  it.each(['P2002', 'P2034'] as const)(
+    'returns conflict when a %s race resolves to the opposite decision',
+    async (code) => {
+      const token = csrfToken();
+      vi.mocked(prisma.$transaction).mockRejectedValueOnce(prismaRace(code));
+      transaction.sightingIdentificationSuggestion.findUnique.mockResolvedValueOnce({
+        ...pending, reviewedAt: new Date('2026-07-19T12:00:00.000Z'),
+        reviewedById: MODERATOR.userId, status: 'REJECTED',
+      });
+
+      const response = await app.inject({
+        cookies: { fluke_admin: moderatorToken, fluke_csrf: token },
+        headers: { 'x-fluke-csrf': token }, method: 'POST',
+        remoteAddress: `127.0.0.${code === 'P2002' ? '43' : '44'}`,
+        url: '/api/v1/admin/identification-suggestions/suggestion-1/accept',
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(transaction.sightingWhale.createMany).not.toHaveBeenCalled();
+      expect(transaction.auditLog.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it('retries the full serializable decision after P2034 with no visible winner', async () => {
+    const token = csrfToken();
+    vi.mocked(prisma.$transaction).mockRejectedValueOnce(prismaRace('P2034'));
+    transaction.sightingIdentificationSuggestion.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(pending);
+    transaction.sightingIdentificationSuggestion.updateMany.mockResolvedValue({ count: 1 });
+
+    const response = await app.inject({
+      cookies: { fluke_admin: moderatorToken, fluke_csrf: token },
+      headers: { 'x-fluke-csrf': token }, method: 'POST', remoteAddress: '127.0.0.45',
+      url: '/api/v1/admin/identification-suggestions/suggestion-1/reject',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ status: 'REJECTED' });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(transaction.auditLog.create).toHaveBeenCalledOnce();
   });
 
   it('rate limits repeated moderation mutations with a safe error', async () => {

@@ -404,27 +404,29 @@ describe.runIf(postgresEnabled)('on-device identifier persistence against Postgr
     });
   });
 
-  it('protects release inventory and model identity while allowing lifecycle updates', async () => {
+  it('protects every registered release field while allowing lifecycle updates', async () => {
     const active = await prisma.identifierRelease.create({
       data: releaseFixture(fixture.activeManifestVersion, 'ACTIVE', 1n),
     });
-
-    await expect(
-      prisma.$executeRaw`
-        UPDATE "identifier_releases"
-        SET "catalog_inventory" = ${JSON.stringify([{
-          catalogId: 'REPLACED', referencePhotoId: 'replaced-reference',
-        }])}::jsonb
-        WHERE "manifest_version" = ${active.manifestVersion}
-      `,
-    ).rejects.toThrow('identifier release metadata is immutable');
-    await expect(
-      prisma.$executeRaw`
-        UPDATE "identifier_releases"
-        SET "model_id" = 'replacement-model'
-        WHERE "manifest_version" = ${active.manifestVersion}
-      `,
-    ).rejects.toThrow('identifier release metadata is immutable');
+    const immutableAssignments = Object.freeze([
+      '"manifest_version" = \'replacement-manifest\'',
+      '"sequence" = 99',
+      '"model_id" = \'replacement-model\'',
+      '"model_version" = \'replacement-model-version\'',
+      '"index_version" = \'replacement-index\'',
+      '"rights_attestation_digest" = \'sha256:replacement\'',
+      '"score_semantics" = \'replacement-semantics\'',
+      `"catalog_inventory" = '${JSON.stringify([{
+        catalogId: 'REPLACED', referencePhotoId: 'replaced-reference',
+      }])}'::jsonb`,
+      '"published_at" = TIMESTAMP \'2027-01-01 00:00:00\'',
+    ]);
+    for (const assignment of immutableAssignments) {
+      await expect(prisma.$executeRawUnsafe(
+        `UPDATE "identifier_releases" SET ${assignment} WHERE "manifest_version" = $1`,
+        active.manifestVersion,
+      )).rejects.toThrow('identifier release metadata is immutable');
+    }
 
     const suggestionsAcceptedUntil = new Date('2026-08-18T12:00:00.000Z');
     const accepted = await prisma.identifierRelease.update({

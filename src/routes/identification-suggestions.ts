@@ -5,9 +5,18 @@ import { StableIdSchema } from '../contracts/index.js';
 import { prisma } from '../db.js';
 import { requireAdmin } from '../lib/auth.js';
 import { requireCsrf } from '../lib/csrf.js';
+import { isPrismaReplayRace } from '../lib/idempotency.js';
 
 const SUGGESTION_MUTATION_LIMIT = 60;
 const SUGGESTION_MUTATION_WINDOW = '1 hour';
+const SERIALIZABLE_ATTEMPTS = 3;
+const MUTATION_MAX_WAIT_MS = 1_000;
+const MUTATION_TIMEOUT_MS = 5_000;
+const MUTATION_TRANSACTION_OPTIONS = Object.freeze({
+  isolationLevel: 'Serializable' as const,
+  maxWait: MUTATION_MAX_WAIT_MS,
+  timeout: MUTATION_TIMEOUT_MS,
+});
 const SuggestionParamsSchema = z.object({ id: StableIdSchema }).strict();
 type Decision = 'ACCEPTED' | 'REJECTED';
 
@@ -17,6 +26,24 @@ class SuggestionConflictError extends Error {
   constructor() {
     super('Suggestion already has a different terminal decision.');
     this.name = 'SuggestionConflictError';
+  }
+}
+
+class SerializableDecisionRaceError extends Error {
+  readonly code = 'P2034';
+
+  constructor() {
+    super('Suggestion decision lost a serializable race.');
+    this.name = 'SerializableDecisionRaceError';
+  }
+}
+
+class MutationDeadlineError extends Error {
+  readonly statusCode = 503;
+
+  constructor() {
+    super('Mutation deadline exceeded.');
+    this.name = 'MutationDeadlineError';
   }
 }
 
@@ -47,10 +74,10 @@ function terminalResponse(record: SuggestionRecord, decision: Decision): Suggest
 }
 
 function findSuggestion(
-  transaction: Prisma.TransactionClient,
+  reader: Pick<Prisma.TransactionClient, 'sightingIdentificationSuggestion'>,
   id: string,
 ) {
-  return transaction.sightingIdentificationSuggestion.findUnique({
+  return reader.sightingIdentificationSuggestion.findUnique({
     select: {
       id: true,
       reviewedAt: true,
@@ -61,6 +88,10 @@ function findSuggestion(
     },
     where: { id },
   });
+}
+
+function throwIfAborted(signal: AbortSignal): void {
+  if (signal.aborted) throw signal.reason ?? new MutationDeadlineError();
 }
 
 async function authorizeSuggestionMutation(
@@ -76,6 +107,29 @@ async function decideSuggestion(
   id: string,
   decision: Decision,
   userId: string,
+  signal: AbortSignal,
+): Promise<SuggestionDecisionResponse | null> {
+  for (let attempt = 1; attempt <= SERIALIZABLE_ATTEMPTS; attempt += 1) {
+    throwIfAborted(signal);
+    try {
+      return await decideSuggestionAttempt(id, decision, userId);
+    } catch (error: unknown) {
+      if (!isPrismaReplayRace(error)) throw error;
+      throwIfAborted(signal);
+      const winner = await findSuggestion(prisma, id);
+      if (winner !== null && winner.status !== 'PENDING') {
+        return terminalResponse(winner, decision);
+      }
+      if (attempt === SERIALIZABLE_ATTEMPTS) throw error;
+    }
+  }
+  throw new Error('Serializable suggestion decision retry exhausted');
+}
+
+async function decideSuggestionAttempt(
+  id: string,
+  decision: Decision,
+  userId: string,
 ): Promise<SuggestionDecisionResponse | null> {
   return prisma.$transaction(async (transaction) => {
     const existing = await findSuggestion(transaction, id);
@@ -87,11 +141,7 @@ async function decideSuggestion(
       data: { reviewedAt, reviewedById: userId, status: decision },
       where: { id, status: 'PENDING' },
     });
-    if (updated.count !== 1) {
-      const winner = await findSuggestion(transaction, id);
-      if (winner === null) return null;
-      return terminalResponse(winner, decision);
-    }
+    if (updated.count !== 1) throw new SerializableDecisionRaceError();
     if (decision === 'ACCEPTED') {
       await transaction.sightingWhale.createMany({
         data: [{
@@ -117,7 +167,7 @@ async function decideSuggestion(
       reviewedById: userId,
       status: decision,
     });
-  }, { isolationLevel: 'Serializable' });
+  }, MUTATION_TRANSACTION_OPTIONS);
 }
 
 const identificationSuggestionRoutes: FastifyPluginAsync = async (fastify) => {
@@ -135,7 +185,9 @@ const identificationSuggestionRoutes: FastifyPluginAsync = async (fastify) => {
     fastify.post(`/:id${path}`, mutationOptions, async (request, reply) => {
       const params = SuggestionParamsSchema.safeParse(request.params);
       if (!params.success) return reply.code(400).send({ error: 'Invalid suggestion' });
-      const result = await decideSuggestion(params.data.id, decision, request.admin!.userId);
+      const result = await decideSuggestion(
+        params.data.id, decision, request.admin!.userId, request.signal,
+      );
       if (result === null) return reply.code(404).send({ error: 'Not found' });
       return result;
     });

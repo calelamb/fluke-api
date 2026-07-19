@@ -6,6 +6,7 @@ import { prisma } from '../db.js';
 import { requireAdmin } from '../lib/auth.js';
 import { boundedDatabaseRead } from '../lib/bounded-database-read.js';
 import { requireCsrf } from '../lib/csrf.js';
+import { isPrismaReplayRace } from '../lib/idempotency.js';
 import {
   IdentifierCatalogInventorySchema,
   validateIdentifierCatalogInventory,
@@ -15,6 +16,14 @@ const SCORE_SEMANTICS = 'uncalibrated_similarity_not_probability';
 const RELEASE_MUTATION_LIMIT = 10;
 const RELEASE_MUTATION_WINDOW = '1 hour';
 const RIGHTS_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/u;
+const SERIALIZABLE_ATTEMPTS = 3;
+const MUTATION_MAX_WAIT_MS = 1_000;
+const MUTATION_TIMEOUT_MS = 5_000;
+const MUTATION_TRANSACTION_OPTIONS = Object.freeze({
+  isolationLevel: 'Serializable' as const,
+  maxWait: MUTATION_MAX_WAIT_MS,
+  timeout: MUTATION_TIMEOUT_MS,
+});
 
 export const IdentifierReleasePublicSchema = z.object({
   manifestVersion: StableIdSchema,
@@ -46,6 +55,15 @@ class ReleaseConflictError extends Error {
   constructor() {
     super('Identifier release conflicts with registered history.');
     this.name = 'ReleaseConflictError';
+  }
+}
+
+class MutationDeadlineError extends Error {
+  readonly statusCode = 503;
+
+  constructor() {
+    super('Mutation deadline exceeded.');
+    this.name = 'MutationDeadlineError';
   }
 }
 
@@ -119,7 +137,11 @@ function releaseData(body: z.infer<typeof RegisterReleaseBodySchema>) {
   };
 }
 
-async function registerRelease(
+function throwIfAborted(signal: AbortSignal): void {
+  if (signal.aborted) throw signal.reason ?? new MutationDeadlineError();
+}
+
+async function registerReleaseAttempt(
   body: z.infer<typeof RegisterReleaseBodySchema>,
   userId: string,
 ): Promise<RegisteredReleaseResponse> {
@@ -163,10 +185,49 @@ async function registerRelease(
       },
     });
     return Object.freeze({ manifestVersion: created.manifestVersion, status: 'ACTIVE' });
-  }, { isolationLevel: 'Serializable' });
+  }, MUTATION_TRANSACTION_OPTIONS);
 }
 
-async function revokeRelease(
+async function registrationHasWinner(
+  body: z.infer<typeof RegisterReleaseBodySchema>,
+): Promise<boolean> {
+  const exact = await prisma.identifierRelease.findUnique({
+    select: { manifestVersion: true },
+    where: { manifestVersion: body.manifestVersion },
+  });
+  if (exact !== null) return true;
+  const latest = await prisma.identifierRelease.findFirst({
+    orderBy: { sequence: 'desc' },
+    select: { sequence: true },
+  });
+  return latest !== null && BigInt(body.sequence) <= latest.sequence;
+}
+
+async function registerRelease(
+  body: z.infer<typeof RegisterReleaseBodySchema>,
+  userId: string,
+  signal: AbortSignal,
+): Promise<RegisteredReleaseResponse> {
+  for (let attempt = 1; attempt <= SERIALIZABLE_ATTEMPTS; attempt += 1) {
+    throwIfAborted(signal);
+    try {
+      return await registerReleaseAttempt(body, userId);
+    } catch (error: unknown) {
+      if (!isPrismaReplayRace(error)) throw error;
+      throwIfAborted(signal);
+      if (await registrationHasWinner(body)) throw new ReleaseConflictError();
+      if (attempt === SERIALIZABLE_ATTEMPTS) {
+        if ((error as { readonly code?: unknown }).code === 'P2002') {
+          throw new ReleaseConflictError();
+        }
+        throw error;
+      }
+    }
+  }
+  throw new Error('Serializable release registration retry exhausted');
+}
+
+async function revokeReleaseAttempt(
   manifestVersion: string,
   userId: string,
 ): Promise<RevokedReleaseResponse | null> {
@@ -192,7 +253,32 @@ async function revokeRelease(
       },
     });
     return Object.freeze({ manifestVersion, status: 'REVOKED' as const });
-  }, { isolationLevel: 'Serializable' });
+  }, MUTATION_TRANSACTION_OPTIONS);
+}
+
+async function revokeRelease(
+  manifestVersion: string,
+  userId: string,
+  signal: AbortSignal,
+): Promise<RevokedReleaseResponse | null> {
+  for (let attempt = 1; attempt <= SERIALIZABLE_ATTEMPTS; attempt += 1) {
+    throwIfAborted(signal);
+    try {
+      return await revokeReleaseAttempt(manifestVersion, userId);
+    } catch (error: unknown) {
+      if (!isPrismaReplayRace(error)) throw error;
+      throwIfAborted(signal);
+      const winner = await prisma.identifierRelease.findUnique({
+        select: { manifestVersion: true, status: true },
+        where: { manifestVersion },
+      });
+      if (winner?.status === 'REVOKED') {
+        return Object.freeze({ manifestVersion, status: 'REVOKED' as const });
+      }
+      if (attempt === SERIALIZABLE_ATTEMPTS) throw error;
+    }
+  }
+  throw new Error('Serializable release revocation retry exhausted');
 }
 
 const identifierReleaseRoutes: FastifyPluginAsync<IdentifierReleaseRouteOptions> = async (
@@ -229,14 +315,18 @@ export const identifierReleaseAdminRoutes: FastifyPluginAsync = async (fastify) 
   fastify.post('/accept', mutationOptions, async (request, reply) => {
     const parsed = RegisterReleaseBodySchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid release' });
-    const registered = await registerRelease(parsed.data, request.admin!.userId);
+    const registered = await registerRelease(
+      parsed.data, request.admin!.userId, request.signal,
+    );
     return reply.code(201).send(registered);
   });
 
   fastify.post('/:manifestVersion/revoke', mutationOptions, async (request, reply) => {
     const params = ReleaseParamsSchema.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: 'Invalid release' });
-    const revoked = await revokeRelease(params.data.manifestVersion, request.admin!.userId);
+    const revoked = await revokeRelease(
+      params.data.manifestVersion, request.admin!.userId, request.signal,
+    );
     if (revoked === null) return reply.code(404).send({ error: 'Not found' });
     return revoked;
   });
