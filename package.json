@@ -32,6 +32,7 @@
     "start": "node dist/src/index.js",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:identifier:postgres": "RUN_POSTGRES_INTEGRATION=1 vitest run tests/integration/on-device-identifier.postgres.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
