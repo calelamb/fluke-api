@@ -37,6 +37,7 @@ import externalSightingsRoutes from './routes/external-sightings.js';
 import healthRoutes, { type ReadinessProbe } from './routes/health.js';
 import historicalSightingsRoutes from './routes/historical-sightings.js';
 import identifyRoutes from './routes/identify.js';
+import identifierReleaseRoutes from './routes/identifier-releases.js';
 import predictRoutes from './routes/predict.js';
 import sightingPhotosRoutes from './routes/sighting-photos.js';
 import sightingSubmissionRoutes from './routes/sighting-submissions.js';
@@ -374,6 +375,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await app.register(historicalSightingsRoutes, boundedReadOptions);
   await app.register(externalSightingsRoutes, boundedReadOptions);
   await app.register(predictRoutes, boundedReadOptions);
+  await app.register(identifierReleaseRoutes, boundedReadOptions);
   if (resolvedOptions.features.submissions) {
     await app.register(sightingSubmissionRoutes, { prefix: '/api/v1' });
   }

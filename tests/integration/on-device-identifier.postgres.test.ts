@@ -185,6 +185,17 @@ describe('on-device identifier schema contract', () => {
     expect(migration).not.toContain('embedding');
     expect(migration).not.toContain('raw_output');
   });
+
+  it('adds a forward-only trigger protecting registered release metadata', () => {
+    const migration = readRepositoryFile(
+      'prisma/migrations/20260718121000_protect_identifier_release_metadata/migration.sql',
+    );
+
+    expect(migration).toContain('BEFORE UPDATE');
+    expect(migration).toContain('identifier_release_metadata_is_immutable');
+    expect(migration.match(/\bIS DISTINCT FROM\b/gu)).toHaveLength(9);
+    expect(migration).not.toMatch(/^\s*(?:DELETE FROM|DROP TABLE|TRUNCATE)\b/mu);
+  });
 });
 
 describe.runIf(postgresEnabled)('on-device identifier persistence against PostgreSQL', () => {
@@ -390,6 +401,46 @@ describe.runIf(postgresEnabled)('on-device identifier persistence against Postgr
       similarityScore: suggestion.similarityScore,
       status: 'REJECTED',
       whaleId: suggestion.whaleId,
+    });
+  });
+
+  it('protects release inventory and model identity while allowing lifecycle updates', async () => {
+    const active = await prisma.identifierRelease.create({
+      data: releaseFixture(fixture.activeManifestVersion, 'ACTIVE', 1n),
+    });
+
+    await expect(
+      prisma.$executeRaw`
+        UPDATE "identifier_releases"
+        SET "catalog_inventory" = ${JSON.stringify([{
+          catalogId: 'REPLACED', referencePhotoId: 'replaced-reference',
+        }])}::jsonb
+        WHERE "manifest_version" = ${active.manifestVersion}
+      `,
+    ).rejects.toThrow('identifier release metadata is immutable');
+    await expect(
+      prisma.$executeRaw`
+        UPDATE "identifier_releases"
+        SET "model_id" = 'replacement-model'
+        WHERE "manifest_version" = ${active.manifestVersion}
+      `,
+    ).rejects.toThrow('identifier release metadata is immutable');
+
+    const suggestionsAcceptedUntil = new Date('2026-08-18T12:00:00.000Z');
+    const accepted = await prisma.identifierRelease.update({
+      data: { status: 'ACCEPTED', suggestionsAcceptedUntil },
+      where: { manifestVersion: active.manifestVersion },
+    });
+    const revokedAt = new Date('2026-07-19T12:00:00.000Z');
+    await expect(prisma.identifierRelease.update({
+      data: { revokedAt, status: 'REVOKED' },
+      where: { manifestVersion: active.manifestVersion },
+    })).resolves.toMatchObject({
+      catalogInventory: active.catalogInventory,
+      modelId: active.modelId,
+      revokedAt,
+      status: 'REVOKED',
+      suggestionsAcceptedUntil: accepted.suggestionsAcceptedUntil,
     });
   });
 

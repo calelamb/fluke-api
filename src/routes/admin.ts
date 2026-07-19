@@ -15,6 +15,8 @@ import { prisma } from '../db.js';
 import { env } from '../env.js';
 import { requireAdmin } from '../lib/auth.js';
 import { buildPhotoFilename, getStorageBackend } from '../lib/storage.js';
+import { identifierReleaseAdminRoutes } from './identifier-releases.js';
+import identificationSuggestionRoutes from './identification-suggestions.js';
 
 function toAnnotationDTO(annotation: {
   id: string;
@@ -135,6 +137,9 @@ function toReferencePhotoDTO(photo: {
 }
 
 export default async function adminRoutes(app: FastifyInstance) {
+  await app.register(identifierReleaseAdminRoutes, { prefix: '/identifier/releases' });
+  await app.register(identificationSuggestionRoutes, { prefix: '/identification-suggestions' });
+
   app.get('/sightings', { preHandler: requireAdmin }, async (req, reply): Promise<PendingSightingDTO[] | void> => {
     const parsed = StatusQuery.safeParse(req.query);
     if (!parsed.success) {
