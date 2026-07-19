@@ -44,7 +44,7 @@ Any missing prerequisite stops the release.
 
 ## Same-SHA CI gate
 
-Require the candidate commit to be green in GitHub Actions. The run must include Node 22.17.0, PostgreSQL integration, migration and seed verification, coverage, lint/typecheck/contracts, production audit, full-history Gitleaks, image build, and both all-off and observer-enabled container smoke tests. Render must then report that exact commit as its source revision. Do not deploy a local-only build or a newer unverified commit.
+Require the candidate commit to be green in GitHub Actions. The run must include Node 22.17.0, PostgreSQL integration, migration and seed verification, coverage, lint/typecheck/contracts, production audit, full-history Gitleaks, image build, and all-off, observer-enabled, and on-device container smoke tests. Render must then report that exact commit as its source revision. Do not deploy a local-only build or a newer unverified commit.
 
 ## Database gate
 
@@ -146,7 +146,7 @@ Before certification, complete one successful-path rollback drill using the curr
 2. Require `GET /api/v1/capabilities` to return exactly `{"accounts":false,"identification":false,"identificationMode":"disabled","submissions":false}`.
 3. Run every exact method/path probe in the rollback runbook and require the canonical `404` envelope for auth, mutation, media, and Identify routes while the listed healthy browse routes return `200`.
 4. Record the rollback drill evidence: GitHub commit, Render source commit/deployment, UTC flag change, every status/envelope, browse result, and database/object counts.
-5. Perform a controlled same-commit re-enable by repeating **Enable observer launch state**, the physical TestFlight Apple gate, **Accept the certified identifier release**, **Enable on-device identification**, and all checks in [observer-operations.md](observer-operations.md). Require the exact enabled capability JSON and Identify `404` again.
+5. Confirm the rollback preserved the previously certified sole `ACTIVE` release, then perform a controlled same-commit re-enable by repeating **Enable observer launch state**, the physical TestFlight Apple gate, **Enable on-device identification**, and all checks in [observer-operations.md](observer-operations.md). Do not register or accept the same release a second time. Require the exact enabled capability JSON and Identify `404` again.
 
 Do not certify the release until the original launch checks and this close/reopen drill pass against the same Git commit. Immediately restore all-off and investigate on any stop condition.
 

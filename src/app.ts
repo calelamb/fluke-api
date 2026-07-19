@@ -7,6 +7,7 @@ import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
 import sensible from '@fastify/sensible';
 import staticPlugin from '@fastify/static';
+import type { Prisma } from '@prisma/client';
 import { mkdir } from 'node:fs/promises';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { SafeErrorSchema } from './contracts/index.js';
@@ -190,26 +191,46 @@ async function defaultActiveReleaseProbe(): Promise<boolean> {
   return activeCount === 1;
 }
 
+export async function probeFeedDependencies(
+  transaction: Prisma.TransactionClient,
+): Promise<void> {
+  await Promise.all([
+    transaction.sighting.findFirst({ select: { id: true } }),
+    transaction.sightingPhoto.findFirst({ select: { id: true } }),
+    transaction.sightingWhale.findFirst({ select: { sightingId: true, whaleId: true } }),
+    transaction.whale.findFirst({ select: { catalogId: true, id: true } }),
+    transaction.externalSighting.findFirst({ select: { id: true } }),
+    transaction.jobRunEvent.findFirst({ select: { id: true } }),
+  ]);
+}
+
 async function defaultFeedProbe(): Promise<void> {
   await boundedDatabaseRead(
     prisma,
-    async (transaction) => {
-      await Promise.all([
-        transaction.sighting.findFirst({ select: { publicFeedRevision: true } }),
-        transaction.externalSighting.findFirst({ select: { publicFeedRevision: true } }),
-      ]);
-    },
+    probeFeedDependencies,
     AbortSignal.timeout(READINESS_TIMEOUT_MS),
     READINESS_TIMEOUT_MS,
   );
 }
 
+export async function probeSubmissionDependencies(
+  transaction: Prisma.TransactionClient,
+): Promise<void> {
+  await Promise.all([
+    transaction.sighting.findFirst({ select: { id: true } }),
+    transaction.submissionIdempotency.findFirst({ select: { id: true } }),
+    transaction.identifierRelease.findFirst({
+      select: { catalogInventory: true, manifestVersion: true },
+    }),
+    transaction.whale.findFirst({ select: { catalogId: true, id: true } }),
+    transaction.sightingIdentificationSuggestion.findFirst({ select: { id: true } }),
+  ]);
+}
+
 async function defaultSubmissionProbe(): Promise<void> {
   await boundedDatabaseRead(
     prisma,
-    async (transaction) => {
-      await transaction.submissionIdempotency.findFirst({ select: { id: true } });
-    },
+    probeSubmissionDependencies,
     AbortSignal.timeout(READINESS_TIMEOUT_MS),
     READINESS_TIMEOUT_MS,
   );

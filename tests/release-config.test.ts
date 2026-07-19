@@ -89,6 +89,22 @@ describe('release configuration', () => {
     expect(containerSmoke).toContain('curl --fail --silent http://localhost:4000/api/v1/ready');
   });
 
+  it('smokes production on-device mode before and after a certified ACTIVE fixture', () => {
+    const workflow = readRepositoryFile('.github/workflows/ci.yml');
+    const deployment = readRepositoryFile('docs/deployment.md');
+    const containerSmoke = workflow.slice(workflow.indexOf('  container-smoke:'));
+
+    expect(containerSmoke).toContain('IDENTIFIER_MODE="$identifier_mode"');
+    expect(containerSmoke).toContain("test \"$unready_status\" = '503'");
+    expect(containerSmoke).toContain('pnpm ci:seed-identifier-release');
+    expect(containerSmoke).toContain(
+      `'{"accounts":true,"identification":true,"identificationMode":"on-device","submissions":true}'`,
+    );
+    expect(containerSmoke).toContain('/api/v1/identifier/releases/current');
+    expect(containerSmoke).toContain('-X POST http://localhost:4000/api/v1/identify');
+    expect(deployment).toContain('on-device container smoke');
+  });
+
   it('documents fail-closed startup migrations for the Render Free release path', () => {
     const readme = readRepositoryFile('README.md');
     const deployment = readRepositoryFile('docs/deployment.md');
@@ -352,6 +368,7 @@ describe('release configuration', () => {
       'Do not certify',
     ]);
     expect(deployment).toContain('Record the rollback drill evidence');
+    expect(drill).not.toContain('Accept the certified identifier release');
   });
 
   it('invalidates restored sessions through a bounded transaction and non-public verifier', () => {

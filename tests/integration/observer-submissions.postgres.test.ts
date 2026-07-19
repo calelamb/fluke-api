@@ -57,15 +57,19 @@ function readRepositoryFile(relativePath: string): string {
 function deployMigrations(schemaPath: string, databaseUrl: string): void {
   const migrationUrl = new URL(databaseUrl);
   migrationUrl.searchParams.delete('options');
-  execFileSync('pnpm', ['exec', 'prisma', 'migrate', 'deploy', '--schema', schemaPath], {
-    cwd: repositoryRoot,
-    env: {
-      ...process.env,
-      DATABASE_URL: migrationUrl.toString(),
-      DIRECT_URL: migrationUrl.toString(),
+  execFileSync(
+    join(repositoryRoot, 'node_modules/.bin/prisma'),
+    ['migrate', 'deploy', '--schema', schemaPath],
+    {
+      cwd: repositoryRoot,
+      env: {
+        ...process.env,
+        DATABASE_URL: migrationUrl.toString(),
+        DIRECT_URL: migrationUrl.toString(),
+      },
+      stdio: 'pipe',
     },
-    stdio: 'pipe',
-  });
+  );
 }
 
 function copyMigrationsThrough(destination: string, latestMigration: string): void {

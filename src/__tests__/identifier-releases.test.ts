@@ -81,7 +81,15 @@ describe('identifier release routes', () => {
 
   beforeAll(async () => {
     process.env.OBSERVER_CSRF_SECRET = CSRF_SECRET;
-    app = await buildApp({ silent: true });
+    app = await buildApp({
+      features: {
+        accounts: true,
+        identification: true,
+        identificationMode: 'server',
+        submissions: true,
+      },
+      silent: true,
+    });
     await app.ready();
     adminToken = app.jwt.sign(ADMIN);
     moderatorToken = app.jwt.sign(MODERATOR);

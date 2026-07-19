@@ -114,7 +114,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: [release-a, release-b]
+        mode: [release-a, release-b, on-device]
     services:
       postgres:
         image: postgres:16.4-bookworm
@@ -176,7 +176,14 @@ jobs:
             exit "$status"
           }
           trap cleanup EXIT
-          if [[ "$RELEASE_MODE" == release-b ]]; then
+          identifier_mode=disabled
+          if [[ "$RELEASE_MODE" == on-device ]]; then
+            accounts=true
+            submissions=true
+            acknowledgement=true
+            identifier_mode=on-device
+            expected='{"accounts":true,"identification":true,"identificationMode":"on-device","submissions":true}'
+          elif [[ "$RELEASE_MODE" == release-b ]]; then
             accounts=true
             submissions=true
             acknowledgement=true
@@ -207,17 +214,33 @@ jobs:
             -e APPLE_KEY_ID=ABC123DEFG \
             -e ENABLE_ACCOUNTS="$accounts" \
             -e ENABLE_SUBMISSIONS="$submissions" \
-            -e IDENTIFIER_MODE=disabled \
+            -e IDENTIFIER_MODE="$identifier_mode" \
             -e PRODUCTION_MUTATIONS_ACK="$acknowledgement" \
             fluke-api:ci
+          startup_probe=ready
+          if [[ "$RELEASE_MODE" == on-device ]]; then startup_probe=health; fi
           for attempt in {1..30}; do
-            if curl --fail --silent http://localhost:4000/api/v1/ready >/dev/null; then break; fi
+            if curl --fail --silent "http://localhost:4000/api/v1/$startup_probe" >/dev/null; then break; fi
             if [[ "$(docker inspect --format '{{.State.Running}}' fluke-api-ci 2>/dev/null || true)" != true ]]; then
               exit 1
             fi
             if (( attempt == 30 )); then exit 1; fi
             sleep 1
           done
+          if [[ "$RELEASE_MODE" == on-device ]]; then
+            unready_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+              http://localhost:4000/api/v1/ready)"
+            test "$unready_status" = '503'
+            pnpm ci:seed-identifier-release
+            for attempt in {1..30}; do
+              if curl --fail --silent http://localhost:4000/api/v1/ready >/dev/null; then break; fi
+              if (( attempt == 30 )); then exit 1; fi
+              sleep 1
+            done
+            release_json="$(curl --fail --silent \
+              http://localhost:4000/api/v1/identifier/releases/current)"
+            RELEASE_JSON="$release_json" node -e 'const r=JSON.parse(process.env.RELEASE_JSON); if (r.manifestVersion !== "ci-on-device-certified-v1" || r.modelVersion !== "ci-model-v1" || r.indexVersion !== "ci-index-v1") process.exit(1)'
+          fi
           test "$(curl --fail --silent http://localhost:4000/api/v1/capabilities)" = "$expected"
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
             -X POST http://localhost:4000/api/v1/identify)" = '404'
