@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fetchGbifSightings } from '../../src/jobs/gbif-ingestion.js';
+import {
+  fetchGbifSightings,
+  fetchGbifSnapshot,
+} from '../../src/jobs/gbif-ingestion.js';
 
 const record = Object.freeze({
   basisOfRecord: 'OBSERVATION',
@@ -11,8 +14,19 @@ const record = Object.freeze({
   species: 'Orcinus orca',
 });
 
-function page(results: readonly unknown[], endOfRecords: boolean): Response {
-  return new Response(JSON.stringify({ count: results.length, endOfRecords, results }));
+function page(
+  results: readonly unknown[],
+  endOfRecords: boolean,
+  count = results.length,
+): Response {
+  return new Response(JSON.stringify({ count, endOfRecords, results }));
+}
+
+function records(count: number, startingKey = 1): readonly typeof record[] {
+  return Array.from({ length: count }, (_, index) => Object.freeze({
+    ...record,
+    key: startingKey + index,
+  }));
 }
 
 describe('fetchGbifSightings', () => {
@@ -58,7 +72,10 @@ describe('fetchGbifSightings', () => {
   });
 
   it('never requests more than fifty provider pages', async () => {
-    const fetchImpl = vi.fn(async () => page([record], false));
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const offset = Number(new URL(String(input)).searchParams.get('offset'));
+      return page(records(300, offset + 1), false, 15_001);
+    });
 
     await fetchGbifSightings({
       fetchImpl,
@@ -68,5 +85,107 @@ describe('fetchGbifSightings', () => {
     });
 
     expect(fetchImpl).toHaveBeenCalledTimes(50);
+
+    const snapshot = await fetchGbifSnapshot({
+      fetchImpl: vi.fn(async (input: string | URL | Request) => {
+        const offset = Number(new URL(String(input)).searchParams.get('offset'));
+        return page(records(300, offset + 1), false, 15_001);
+      }),
+      signal: new AbortController().signal,
+      sleep: async () => undefined,
+      years: 5,
+    });
+    expect(snapshot.reconciliation).toBeNull();
+  });
+
+  it('fails closed when an empty page is marked nonterminal', async () => {
+    const snapshot = await fetchGbifSnapshot({
+      fetchImpl: vi.fn(async () => page([], false, 2)),
+      signal: new AbortController().signal,
+      sleep: async () => undefined,
+      years: 5,
+    });
+
+    expect(snapshot.reconciliation).toBeNull();
+  });
+
+  it('fails closed when a short page is marked nonterminal', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(page([record], false, 2))
+      .mockResolvedValueOnce(page([{ ...record, key: 43 }], true, 2));
+
+    const snapshot = await fetchGbifSnapshot({
+      fetchImpl,
+      signal: new AbortController().signal,
+      sleep: async () => undefined,
+      years: 5,
+    });
+
+    expect(snapshot.reconciliation).toBeNull();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed when the provider count changes during pagination', async () => {
+    const firstPage = records(300);
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(page(firstPage, false, 301))
+      .mockResolvedValueOnce(page([{ ...record, key: 301 }], true, 302));
+
+    const snapshot = await fetchGbifSnapshot({
+      fetchImpl,
+      signal: new AbortController().signal,
+      sleep: async () => undefined,
+      years: 5,
+    });
+
+    expect(snapshot.reconciliation).toBeNull();
+  });
+
+  it('fails closed when a stable-count scan repeats an occurrence across pages', async () => {
+    const firstPage = records(300);
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(page(firstPage, false, 301))
+      .mockResolvedValueOnce(page([{ ...record, key: 300 }], true, 301));
+
+    const snapshot = await fetchGbifSnapshot({
+      fetchImpl,
+      signal: new AbortController().signal,
+      sleep: async () => undefined,
+      years: 5,
+    });
+
+    expect(snapshot.reconciliation).toBeNull();
+  });
+
+  it('returns an authoritative snapshot after a stable complete multipage scan', async () => {
+    const firstPage = records(300);
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(page(firstPage, false, 301))
+      .mockResolvedValueOnce(page([{ ...record, key: 301 }], true, 301));
+
+    const snapshot = await fetchGbifSnapshot({
+      fetchImpl,
+      signal: new AbortController().signal,
+      sleep: async () => undefined,
+      years: 5,
+    });
+
+    expect(snapshot.reconciliation).toEqual(expect.objectContaining({
+      authoritative: true,
+      seenExternalIds: expect.arrayContaining(['1', '300', '301']),
+      source: 'gbif',
+    }));
+    expect(fetchImpl.mock.calls[1]?.[0]).toContain('offset=300');
+  });
+
+  it('rejects a provider failure without producing a snapshot', async () => {
+    const fetchImpl = vi.fn(async () => new Response('unavailable', { status: 503 }));
+
+    await expect(fetchGbifSnapshot({
+      fetchImpl,
+      signal: new AbortController().signal,
+      sleep: async () => undefined,
+      years: 5,
+    })).rejects.toThrow();
   });
 });

@@ -107,7 +107,10 @@ describe('GET /api/v1/sightings/historical', () => {
       }),
     }));
     expect(prisma.externalSighting.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ ecotypeGuess: 'RESIDENT' }),
+      where: expect.objectContaining({
+        ecotypeGuess: 'RESIDENT',
+        publicFeedRemovedAt: null,
+      }),
     }));
     expect(prisma.$transaction).toHaveBeenCalledWith(
       expect.any(Function),

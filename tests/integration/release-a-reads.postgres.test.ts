@@ -68,7 +68,12 @@ describe.runIf(postgresEnabled)('Release A reads against PostgreSQL', () => {
     }
 
     app = await buildApp({
-      features: Object.freeze({ accounts: false, identification: false, submissions: false }),
+      features: Object.freeze({
+        accounts: false,
+        identification: false,
+        identificationMode: 'disabled' as const,
+        submissions: false,
+      }),
       silent: true,
     });
     await app.ready();

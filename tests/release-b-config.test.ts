@@ -4,7 +4,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { parse as parseDotEnv } from 'dotenv';
 import { describe, expect, it } from 'vitest';
 import { parseEnv } from '../src/env.js';
-import { createFeatureConfig } from '../src/features.js';
+import { createFeatureConfig, validateFeatureConfig } from '../src/features.js';
 
 const REQUIRED_ENV: NodeJS.ProcessEnv = {
   DATABASE_URL: 'postgresql://test:test@localhost:5432/test',
@@ -84,8 +84,69 @@ describe('Release B production capability configuration', () => {
     expect(createFeatureConfig(env)).toEqual({
       accounts: true,
       identification: false,
+      identificationMode: 'disabled',
       submissions: true,
     });
+  });
+
+  it('rejects server inference but accepts on-device identification in production', () => {
+    expect(() => parseEnv({
+      ...SAFE_RELEASE_B_ENV,
+      ENABLE_IDENTIFY: undefined,
+      IDENTIFIER_MODE: 'server',
+    })).toThrow(/IDENTIFIER_MODE.*server/u);
+
+    const onDevice = parseEnv({
+      ...SAFE_RELEASE_B_ENV,
+      ENABLE_IDENTIFY: undefined,
+      IDENTIFIER_MODE: 'on-device',
+    });
+    expect(createFeatureConfig(onDevice)).toMatchObject({
+      identification: true,
+      identificationMode: 'on-device',
+    });
+  });
+
+  it('rejects production on-device mode without the submission surface', () => {
+    expect(() => parseEnv({
+      ...SAFE_RELEASE_B_ENV,
+      ENABLE_ACCOUNTS: 'false',
+      ENABLE_IDENTIFY: undefined,
+      ENABLE_SUBMISSIONS: 'false',
+      IDENTIFIER_MODE: 'on-device',
+      PRODUCTION_MUTATIONS_ACK: 'false',
+    })).toThrow(/IDENTIFIER_MODE.*submissions/u);
+  });
+
+  it('reports identification available in both compute modes', () => {
+    const onDevice = parseEnv({
+      ...REQUIRED_ENV,
+      IDENTIFIER_MODE: 'on-device',
+      NODE_ENV: 'test',
+    });
+    const server = parseEnv({
+      ...REQUIRED_ENV,
+      IDENTIFIER_MODE: 'server',
+      NODE_ENV: 'test',
+    });
+
+    expect(createFeatureConfig(onDevice)).toMatchObject({
+      identification: true,
+      identificationMode: 'on-device',
+    });
+    expect(createFeatureConfig(server)).toMatchObject({
+      identification: true,
+      identificationMode: 'server',
+    });
+  });
+
+  it('rejects a capability boolean that contradicts the declared mode', () => {
+    expect(() => validateFeatureConfig({
+      accounts: false,
+      identification: false,
+      identificationMode: 'on-device',
+      submissions: true,
+    })).toThrow(/identification must match identificationMode/u);
   });
 
   it.each([
@@ -201,6 +262,7 @@ describe('Release B production capability configuration', () => {
     expect(createFeatureConfig(parsed)).toEqual({
       accounts: false,
       identification: false,
+      identificationMode: 'disabled',
       submissions: false,
     });
   });

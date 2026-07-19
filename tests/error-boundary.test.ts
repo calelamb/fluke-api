@@ -26,6 +26,7 @@ const { buildApp, safeErrorDiagnostics } = await import('../src/app.js');
 const RELEASE_A_FEATURES = Object.freeze({
   accounts: false,
   identification: false,
+  identificationMode: 'disabled' as const,
   submissions: false,
 });
 
@@ -113,7 +114,12 @@ describe('global safe error boundary', () => {
     });
 
     const authApp = await createApp({
-      features: Object.freeze({ accounts: true, identification: false, submissions: false }),
+      features: Object.freeze({
+        accounts: true,
+        identification: false,
+        identificationMode: 'disabled' as const,
+        submissions: false,
+      }),
     });
     const auth = await authApp.inject({
       headers: { 'x-request-id': 'auth-request' },

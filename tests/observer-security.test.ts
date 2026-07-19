@@ -43,6 +43,7 @@ describe('observer release security gates', () => {
 
   it('executes the shared verify-job environment without product env collisions', () => {
     const workflow = readRepositoryFile('.github/workflows/ci.yml');
+    const testSetup = readRepositoryFile('src/__tests__/setup.ts');
     const fixture = parseDotEnv(readRepositoryFile('.github/ci-test.env'));
     const exactVerifyEnvironment = {
       ...fixture,
@@ -51,22 +52,29 @@ describe('observer release security gates', () => {
     };
 
     expect(workflow).toContain(`cat .github/ci-test.env >> "$GITHUB_ENV"`);
+    expect(testSetup).toContain("process.env.IDENTIFIER_MODE ??= 'server'");
+    expect(testSetup).not.toMatch(/process\.env\.ENABLE_IDENTIFY\s*=/u);
     expect(parseEnv(exactVerifyEnvironment)).toMatchObject({
       ENABLE_ACCOUNTS: false,
       ENABLE_IDENTIFY: false,
       ENABLE_SUBMISSIONS: false,
+      IDENTIFIER_MODE: 'disabled',
       NODE_ENV: 'test',
       STORAGE_BACKEND: 'local',
     });
-    expect(() => execFileSync('pnpm', ['ci:env:check'], {
-      cwd: repositoryRoot,
-      env: {
-        HOME: process.env.HOME,
-        PATH: process.env.PATH,
-        ...exactVerifyEnvironment,
+    expect(() => execFileSync(
+      `${repositoryRoot}node_modules/.bin/tsx`,
+      ['scripts/check-ci-environment.ts'],
+      {
+        cwd: repositoryRoot,
+        env: {
+          HOME: process.env.HOME,
+          PATH: process.env.PATH,
+          ...exactVerifyEnvironment,
+        },
+        stdio: 'pipe',
       },
-      stdio: 'pipe',
-    })).not.toThrow();
+    )).not.toThrow();
   });
 
   it('loads the reviewed database environment in every migration job', () => {
@@ -79,9 +87,20 @@ describe('observer release security gates', () => {
   it('certifies both production feature modes and keeps identify unavailable', () => {
     const workflow = readRepositoryFile('.github/workflows/ci.yml');
 
-    expect(workflow).toContain('mode: [release-a, release-b]');
-    expect(workflow).toContain(`'{"accounts":true,"identification":false,"submissions":true}'`);
+    expect(workflow).toContain('mode: [release-a, release-b, on-device]');
+    expect(workflow).toContain(
+      `'{"accounts":true,"identification":false,"identificationMode":"disabled","submissions":true}'`,
+    );
     expect(workflow).toContain("= '404'");
+  });
+
+  it('keeps the synthetic on-device release inside the isolated CI database', () => {
+    const workflow = readRepositoryFile('.github/workflows/ci.yml');
+    const containerSmoke = workflow.slice(workflow.indexOf('  container-smoke:'));
+
+    expect(containerSmoke).toContain('pnpm ci:seed-identifier-release');
+    expect(containerSmoke).toContain('"$RELEASE_MODE" == on-device');
+    expect(containerSmoke).not.toContain('secrets.');
   });
 
   it('runs migrations, contracts, quality, security, and image gates', () => {

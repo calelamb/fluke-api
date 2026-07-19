@@ -1,5 +1,6 @@
 {
   "accounts": false,
   "identification": false,
+  "identificationMode": "disabled",
   "submissions": false
 }

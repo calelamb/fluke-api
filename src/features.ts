@@ -8,13 +8,14 @@ export type FeatureConfig = Readonly<Capabilities>;
 
 type FeatureEnvironment = Pick<
   Env,
-  'ENABLE_ACCOUNTS' | 'ENABLE_IDENTIFY' | 'ENABLE_SUBMISSIONS'
+  'ENABLE_ACCOUNTS' | 'ENABLE_SUBMISSIONS' | 'IDENTIFIER_MODE'
 >;
 
 export function createFeatureConfig(input: FeatureEnvironment): FeatureConfig {
   return Object.freeze(CapabilitiesSchema.parse({
     accounts: input.ENABLE_ACCOUNTS,
-    identification: input.ENABLE_IDENTIFY,
+    identification: input.IDENTIFIER_MODE !== 'disabled',
+    identificationMode: input.IDENTIFIER_MODE,
     submissions: input.ENABLE_SUBMISSIONS,
   }));
 }

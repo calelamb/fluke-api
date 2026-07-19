@@ -11,6 +11,7 @@ describe('GET /api/v1/capabilities', () => {
       features: {
         accounts: false,
         identification: false,
+        identificationMode: 'disabled',
         submissions: false,
       },
       silent: true,
@@ -32,6 +33,7 @@ describe('GET /api/v1/capabilities', () => {
     expect(CapabilitiesSchema.parse(response.json())).toEqual({
       accounts: false,
       identification: false,
+      identificationMode: 'disabled',
       submissions: false,
     });
   });

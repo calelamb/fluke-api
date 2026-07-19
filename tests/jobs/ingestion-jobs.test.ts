@@ -83,4 +83,58 @@ describe('provider ingestion jobs', () => {
     expect(runFenced).toHaveBeenCalledTimes(2);
     expect(upsert).toHaveBeenCalledTimes(201);
   });
+
+  it('reconciles only an explicitly authoritative provider snapshot behind the fence', async () => {
+    const upsert = vi.fn(async () => undefined);
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const runFenced = vi.fn(async (_lease: JobLease, operation: (client: unknown) => Promise<number>) => (
+      operation({ externalSighting: { updateMany, upsert } })
+    ));
+    const observedFrom = new Date('2026-07-09T00:00:00.000Z');
+    const observedTo = new Date('2026-07-16T00:00:00.000Z');
+
+    const summary = await runAcartiaIngestion({
+      fetchSightings: async () => ({
+        reconciliation: {
+          authoritative: true as const,
+          observedFrom,
+          observedTo,
+          seenExternalIds: [sighting.externalId],
+          source: 'acartia' as const,
+        },
+        sightings: [{ ...sighting, source: 'acartia' as const }],
+      }),
+      lease,
+      signal: new AbortController().signal,
+      store: { runFenced },
+    });
+
+    expect(summary).toEqual({ processed: 1, provider: 'acartia' });
+    expect(runFenced).toHaveBeenCalledTimes(2);
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: {
+        fetchedAt: expect.any(Date),
+        publicFeedRemovedAt: expect.any(Date),
+      },
+      where: expect.objectContaining({
+        externalId: { notIn: [sighting.externalId] },
+        observedAt: { gte: observedFrom, lte: observedTo },
+        publicFeedRemovedAt: null,
+        source: 'acartia',
+      }),
+    }));
+  });
+
+  it('does not reconcile ambiguous or failed provider fetches', async () => {
+    const runFenced = vi.fn();
+    await expect(runGbifIngestion({
+      fetchSightings: async () => {
+        throw new Error('partial provider response');
+      },
+      lease,
+      signal: new AbortController().signal,
+      store: { runFenced },
+    })).rejects.toThrow('partial provider response');
+    expect(runFenced).not.toHaveBeenCalled();
+  });
 });

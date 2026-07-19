@@ -57,15 +57,19 @@ function readRepositoryFile(relativePath: string): string {
 function deployMigrations(schemaPath: string, databaseUrl: string): void {
   const migrationUrl = new URL(databaseUrl);
   migrationUrl.searchParams.delete('options');
-  execFileSync('pnpm', ['exec', 'prisma', 'migrate', 'deploy', '--schema', schemaPath], {
-    cwd: repositoryRoot,
-    env: {
-      ...process.env,
-      DATABASE_URL: migrationUrl.toString(),
-      DIRECT_URL: migrationUrl.toString(),
+  execFileSync(
+    join(repositoryRoot, 'node_modules/.bin/prisma'),
+    ['migrate', 'deploy', '--schema', schemaPath],
+    {
+      cwd: repositoryRoot,
+      env: {
+        ...process.env,
+        DATABASE_URL: migrationUrl.toString(),
+        DIRECT_URL: migrationUrl.toString(),
+      },
+      stdio: 'pipe',
     },
-    stdio: 'pipe',
-  });
+  );
 }
 
 function copyMigrationsThrough(destination: string, latestMigration: string): void {
@@ -278,7 +282,12 @@ describe.runIf(postgresEnabled)('observer submissions against PostgreSQL', () =>
     const observerEmail = `replay-${process.pid}@example.invalid`;
     const { buildApp } = await import('../../src/app.js');
     const app = await buildApp({
-      features: Object.freeze({ accounts: false, identification: false, submissions: true }),
+      features: Object.freeze({
+        accounts: false,
+        identification: false,
+        identificationMode: 'disabled' as const,
+        submissions: true,
+      }),
       silent: true,
     });
     await app.ready();
@@ -379,7 +388,12 @@ describe.runIf(postgresEnabled)('observer submissions against PostgreSQL', () =>
     const clientSubmissionId = '1c39ac39-ce63-498c-9197-48f64ebaddb7';
     const { buildApp } = await import('../../src/app.js');
     const app = await buildApp({
-      features: Object.freeze({ accounts: false, identification: false, submissions: true }),
+      features: Object.freeze({
+        accounts: false,
+        identification: false,
+        identificationMode: 'disabled' as const,
+        submissions: true,
+      }),
       silent: true,
     });
     await app.ready();
@@ -434,7 +448,12 @@ describe.runIf(postgresEnabled)('observer submissions against PostgreSQL', () =>
     const ids = [`${firstUserId}-new`, `${firstUserId}-old`, `${secondUserId}-private`];
     const { buildApp } = await import('../../src/app.js');
     const app = await buildApp({
-      features: Object.freeze({ accounts: true, identification: false, submissions: false }),
+      features: Object.freeze({
+        accounts: true,
+        identification: false,
+        identificationMode: 'disabled' as const,
+        submissions: false,
+      }),
       silent: true,
     });
     await app.ready();
@@ -511,7 +530,12 @@ describe.runIf(postgresEnabled)('observer submissions against PostgreSQL', () =>
     });
     const { buildApp } = await import('../../src/app.js');
     const app = await buildApp({
-      features: Object.freeze({ accounts: true, identification: false, submissions: true }),
+      features: Object.freeze({
+        accounts: true,
+        identification: false,
+        identificationMode: 'disabled' as const,
+        submissions: true,
+      }),
       observerAuth: { appleAuth, storage, tokenCrypto },
       silent: true,
     });

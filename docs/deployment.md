@@ -44,7 +44,7 @@ Any missing prerequisite stops the release.
 
 ## Same-SHA CI gate
 
-Require the candidate commit to be green in GitHub Actions. The run must include Node 22.17.0, PostgreSQL integration, migration and seed verification, coverage, lint/typecheck/contracts, production audit, full-history Gitleaks, image build, and both all-off and observer-enabled container smoke tests. Render must then report that exact commit as its source revision. Do not deploy a local-only build or a newer unverified commit.
+Require the candidate commit to be green in GitHub Actions. The run must include Node 22.17.0, PostgreSQL integration, migration and seed verification, coverage, lint/typecheck/contracts, production audit, full-history Gitleaks, image build, and all-off, observer-enabled, and on-device container smoke tests. Render must then report that exact commit as its source revision. Do not deploy a local-only build or a newer unverified commit.
 
 ## Database gate
 
@@ -76,10 +76,10 @@ Keep the production gate exactly all-off:
 PRODUCTION_MUTATIONS_ACK=false
 ENABLE_ACCOUNTS=false
 ENABLE_SUBMISSIONS=false
-ENABLE_IDENTIFY=false
+IDENTIFIER_MODE=disabled
 ```
 
-Partial secret sets, local storage, partial account/submission flags, or Identify enabled must fail startup and stop the release.
+Remove the legacy `ENABLE_IDENTIFY` variable before setting `IDENTIFIER_MODE`; conflicting dual configuration fails startup. An older deployment with no `IDENTIFIER_MODE` remains compatible: `ENABLE_IDENTIFY=true` maps to `server`, while false or absent maps to `disabled`. Partial secret sets, local storage, partial account/submission flags, or production server inference must fail startup and stop the release.
 
 ## Safe all-off deploy
 
@@ -88,7 +88,7 @@ Partial secret sets, local storage, partial account/submission flags, or Identif
 3. Require `GET /api/v1/capabilities` to return exactly:
 
    ```json
-   {"accounts":false,"identification":false,"submissions":false}
+   {"accounts":false,"identification":false,"identificationMode":"disabled","submissions":false}
    ```
 
 4. Require the catalog and sighting browse routes to remain healthy.
@@ -104,10 +104,10 @@ Change all four values in the same Render configuration operation:
 PRODUCTION_MUTATIONS_ACK=true
 ENABLE_ACCOUNTS=true
 ENABLE_SUBMISSIONS=true
-ENABLE_IDENTIFY=false
+IDENTIFIER_MODE=disabled
 ```
 
-Deploy the unchanged Render source commit. Require health and readiness `200`, then require `GET /api/v1/capabilities` to return exactly `{"accounts":true,"identification":false,"submissions":true}`. POST /api/v1/identify must return 404 using the canonical error envelope.
+Deploy the unchanged Render source commit. Require health and readiness `200`, then require `GET /api/v1/capabilities` to return exactly `{"accounts":true,"identification":false,"identificationMode":"disabled","submissions":true}`. POST /api/v1/identify must return 404 using the canonical error envelope.
 
 Do not open or announce observer access yet. The auth route is intentionally unregistered in the all-off state, so the physical production sign-in gate can occur only after this exact state is live. Any failure from this point requires the all-off rollback.
 
@@ -117,15 +117,36 @@ Immediately use the candidate iOS build on a physical TestFlight device. Complet
 
 Run every fake-free check in [observer-operations.md](observer-operations.md), including proof that media survives an API redeploy on Render. Record sanitized IDs and pass/fail results, never cookies, tokens, email, request bodies, private keys, or object keys.
 
+## Accept the certified identifier release
+
+Keep `IDENTIFIER_MODE=disabled` while preparing the on-device release. Run the external verifier against the exact model, index, manifest, rights digest, and catalog inventory shipped in the same candidate mobile build. The verifier must produce immutable evidence with `ready:true`; any missing catalog member, version mismatch, rights failure, or non-ready result stops the release.
+
+After recording that external verifier evidence, an administrator may accept the immutable release through the reviewed admin endpoint. Acceptance creates exactly one status `ACTIVE` release; `ACCEPTED` means superseded and is not readiness evidence. Confirm directly against the recorded production database identity that exactly one release is `ACTIVE`. Do not add or infer a second persisted readiness flag.
+
+## Enable on-device identification
+
+Set `IDENTIFIER_MODE=on-device` and redeploy the unchanged Render source commit. Never set `IDENTIFIER_MODE=server` in production. The API readiness check now requires the existing migration/database probe, exactly one `ACTIVE` identifier release, a healthy public-feed dependency, and a healthy submission dependency.
+
+Require all of these same-SHA probes before opening identification:
+
+1. `GET /api/v1/health` and `GET /api/v1/ready` return `200`.
+2. `GET /api/v1/capabilities` returns exactly `{"accounts":true,"identification":true,"identificationMode":"on-device","submissions":true}`.
+3. `GET /api/v1/identifier/releases/current` returns `200` metadata matching the externally verified manifest, model, and index versions.
+4. `GET /api/v1/sighting-feed` returns `200` with its strict public envelope.
+5. `POST /api/v1/sightings` completes one bounded, idempotent TestFlight submission carrying valid local-identification evidence, then an exact replay returns the same sighting and suggestion IDs.
+6. `POST /api/v1/identify` must return 404 using the canonical error envelope.
+
+Any `503`, missing/mismatched release, feed failure, submission failure, duplicate replay, capability mismatch, or server Identify exposure requires the all-off rollback. Record the GitHub SHA, Render source SHA, release manifest, sanitized response IDs, and UTC probe results.
+
 ## Mandatory rollback drill
 
 Before certification, complete one successful-path rollback drill using the current verified commit:
 
 1. Follow **Close mutations first** in [rollback.md](rollback.md) without reverting code.
-2. Require `GET /api/v1/capabilities` to return exactly `{"accounts":false,"identification":false,"submissions":false}`.
+2. Require `GET /api/v1/capabilities` to return exactly `{"accounts":false,"identification":false,"identificationMode":"disabled","submissions":false}`.
 3. Run every exact method/path probe in the rollback runbook and require the canonical `404` envelope for auth, mutation, media, and Identify routes while the listed healthy browse routes return `200`.
 4. Record the rollback drill evidence: GitHub commit, Render source commit/deployment, UTC flag change, every status/envelope, browse result, and database/object counts.
-5. Perform a controlled same-commit re-enable by repeating **Enable observer launch state**, the physical TestFlight Apple gate, and all checks in [observer-operations.md](observer-operations.md). Require the exact enabled capability JSON and Identify `404` again.
+5. Confirm the rollback preserved the previously certified sole `ACTIVE` release, then perform a controlled same-commit re-enable by repeating **Enable observer launch state**, the physical TestFlight Apple gate, **Enable on-device identification**, and all checks in [observer-operations.md](observer-operations.md). Do not register or accept the same release a second time. Require the exact enabled capability JSON and Identify `404` again.
 
 Do not certify the release until the original launch checks and this close/reopen drill pass against the same Git commit. Immediately restore all-off and investigate on any stop condition.
 

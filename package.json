@@ -9,6 +9,7 @@
     "audit": "pnpm audit --prod --audit-level=high",
     "build": "tsc",
     "ci:env:check": "tsx scripts/check-ci-environment.ts",
+    "ci:seed-identifier-release": "tsx scripts/seed-ci-identifier-release.ts",
     "contracts:check": "tsx scripts/check-contracts.ts",
     "contracts:generate": "tsx scripts/generate-contracts.ts",
     "db:create-admin": "tsx scripts/create-admin.ts",
@@ -32,6 +33,7 @@
     "start": "node dist/src/index.js",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:identifier:postgres": "RUN_POSTGRES_INTEGRATION=1 vitest run tests/integration/on-device-identifier.postgres.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

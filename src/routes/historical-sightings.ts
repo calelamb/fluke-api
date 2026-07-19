@@ -167,6 +167,7 @@ function historicalWhere(read: HistoricalRead) {
   const ecotype = externalEcotype(read.pod);
   const externalBase: Prisma.ExternalSightingWhereInput = {
     observedAt: dateRange,
+    publicFeedRemovedAt: null,
     ...(ecotype ? { ecotypeGuess: ecotype } : {}),
   };
   const internalBoundary = internalCursorBoundary(read.cursor);

@@ -49,7 +49,15 @@ describe('POST /api/v1/identify', () => {
 
   beforeAll(async () => {
     uploadsRoot = await mkdtemp(path.join(tmpdir(), 'fluke-identify-test-'));
-    app = await buildApp({ silent: true });
+    app = await buildApp({
+      features: {
+        accounts: false,
+        identification: true,
+        identificationMode: 'server',
+        submissions: false,
+      },
+      silent: true,
+    });
     await app.ready();
   });
 
