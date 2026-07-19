@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Prisma, PrismaClient } from '@prisma/client';
+import type { FastifyInstance } from 'fastify';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -15,6 +16,8 @@ const fixture = Object.freeze({
   duplicateActiveManifestVersion: 'it-identifier-release-duplicate-active',
   duplicateSequenceManifestVersion: 'it-identifier-release-duplicate-sequence',
   reviewerId: 'it-identifier-reviewer',
+  routeClientSubmissionId: 'c399fbab-ae36-4cb5-a7c8-61d341799a82',
+  routeObserverEmail: 'identifier-route@example.invalid',
   secondAcceptedManifestVersion: 'it-identifier-release-second-accepted',
   sightingId: 'it-identifier-sighting',
   whaleId: 'it-identifier-whale',
@@ -30,11 +33,12 @@ function releaseFixture(
   sequence: bigint,
 ): Prisma.IdentifierReleaseCreateInput {
   return Object.freeze({
-    catalogInventory: Object.freeze({
-      maximumAppBuild: 84,
-      minimumAppBuild: 42,
-      whaleCount: 1,
-    }),
+    catalogInventory: Object.freeze([
+      Object.freeze({
+        catalogId: fixture.catalogId,
+        referencePhotoId: 'it-reference-photo-left',
+      }),
+    ]),
     indexVersion: 'index-v1',
     manifestVersion,
     modelId: 'miewid',
@@ -61,6 +65,68 @@ function suggestionFixture(
   });
 }
 
+const routeSubmissionPayload = Object.freeze({
+  clientSubmissionId: fixture.routeClientSubmissionId,
+  latitude: 48.5,
+  localIdentification: Object.freeze({
+    catalogId: fixture.catalogId,
+    indexVersion: 'index-v1',
+    manifestVersion: fixture.activeManifestVersion,
+    matchedReferencePhotoIds: Object.freeze(['it-reference-photo-left']),
+    modelVersion: 'model-v1',
+    scoreSemantics,
+    similarityScore: 0.8123456,
+  }),
+  longitude: -123,
+  observedAt: '2026-07-18T12:15:00.000Z',
+  observerEmail: fixture.routeObserverEmail,
+});
+
+interface CreatedRouteSubmission {
+  readonly identificationSuggestionId: string;
+  readonly id: string;
+}
+
+async function expectStoredRouteSuggestion(
+  prisma: PrismaClient,
+  created: CreatedRouteSubmission,
+): Promise<void> {
+  await expect(prisma.sightingIdentificationSuggestion.findUniqueOrThrow({
+    where: { id: created.identificationSuggestionId },
+  })).resolves.toMatchObject({
+    matchedReferencePhotoIds: ['it-reference-photo-left'],
+    releaseManifestVersion: fixture.activeManifestVersion,
+    scoreSemantics,
+    sightingId: created.id,
+    status: 'PENDING',
+    whaleId: fixture.whaleId,
+  });
+  await expect(prisma.sightingWhale.count({
+    where: { sightingId: created.id },
+  })).resolves.toBe(0);
+}
+
+async function expectIdempotentRouteReplay(
+  app: FastifyInstance,
+  prisma: PrismaClient,
+  created: CreatedRouteSubmission,
+): Promise<void> {
+  const replayed = await app.inject({
+    method: 'POST', payload: routeSubmissionPayload, url: '/api/v1/sightings',
+  });
+  expect(replayed.statusCode).toBe(200);
+  expect(replayed.json()).toMatchObject({
+    id: created.id,
+    identificationSuggestionId: created.identificationSuggestionId,
+  });
+  await expect(prisma.sightingIdentificationSuggestion.count({
+    where: { sightingId: created.id },
+  })).resolves.toBe(1);
+  await expect(prisma.submissionIdempotency.count({
+    where: { sightingId: created.id },
+  })).resolves.toBe(1);
+}
+
 async function identifierReleaseTableExists(prisma: PrismaClient): Promise<boolean> {
   const [result] = await prisma.$queryRaw<Array<{ readonly tableName: string | null }>>`
     SELECT to_regclass('identifier_releases')::text AS "tableName"
@@ -69,7 +135,14 @@ async function identifierReleaseTableExists(prisma: PrismaClient): Promise<boole
 }
 
 async function cleanupFixture(prisma: PrismaClient): Promise<void> {
-  await prisma.sighting.deleteMany({ where: { id: fixture.sightingId } });
+  await prisma.sighting.deleteMany({
+    where: {
+      OR: [
+        { id: fixture.sightingId },
+        { observerEmail: fixture.routeObserverEmail },
+      ],
+    },
+  });
   if (await identifierReleaseTableExists(prisma)) {
     await prisma.$executeRaw`
       DELETE FROM "identifier_releases"
@@ -170,6 +243,32 @@ describe.runIf(postgresEnabled)('on-device identifier persistence against Postgr
         data: suggestionFixture(fixture.sightingId, active.manifestVersion),
       }),
     ).rejects.toMatchObject({ code: 'P2002' });
+  });
+
+  it('persists and replays a validated suggestion through the HTTP submission route', async () => {
+    await prisma.identifierRelease.create({
+      data: releaseFixture(fixture.activeManifestVersion, 'ACTIVE', 1n),
+    });
+    const { buildApp } = await import('../../src/app.js');
+    const app = await buildApp({
+      features: { accounts: false, identification: false, submissions: true },
+      silent: true,
+    });
+
+    try {
+      const created = await app.inject({
+        method: 'POST',
+        payload: routeSubmissionPayload,
+        url: '/api/v1/sightings',
+      });
+      expect(created.statusCode).toBe(201);
+      const createdBody = created.json<CreatedRouteSubmission>();
+      expect(createdBody.identificationSuggestionId).toMatch(/^[0-9a-f-]{36}$/u);
+      await expectStoredRouteSuggestion(prisma, createdBody);
+      await expectIdempotentRouteReplay(app, prisma, createdBody);
+    } finally {
+      await app.close();
+    }
   });
 
   it('keeps identifier evidence canonical while allowing independent moderation', async () => {

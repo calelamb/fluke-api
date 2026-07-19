@@ -28,14 +28,18 @@ export const IdentifierCatalogInventorySchema = z.array(
 
 type InventoryEntry = z.infer<typeof IdentifierCatalogInventoryEntrySchema>;
 
-interface CanonicalWhale {
+export interface CanonicalWhale {
   readonly catalogId: string;
   readonly id: string;
 }
 
+export interface CanonicalWhaleLookup {
+  readonly get: (catalogId: string) => CanonicalWhale | undefined;
+}
+
 export interface ValidatedIdentifierCatalogInventory {
   readonly entries: readonly Readonly<InventoryEntry>[];
-  readonly whalesByCatalogId: ReadonlyMap<string, CanonicalWhale>;
+  readonly whalesByCatalogId: CanonicalWhaleLookup;
 }
 
 export interface ResolvedLocalSuggestion {
@@ -90,16 +94,19 @@ function versionsMatch(
     && release.scoreSemantics === input.scoreSemantics;
 }
 
-function canonicalWhaleMap(
+function canonicalWhaleLookup(
   whales: readonly CanonicalWhale[],
   expectedCatalogIds: ReadonlySet<string>,
-): ReadonlyMap<string, CanonicalWhale> {
-  const byCatalogId = new Map(whales.map((whale) => [whale.catalogId, Object.freeze(whale)]));
+): CanonicalWhaleLookup {
+  const immutableWhales = whales.map((whale) => Object.freeze({ ...whale }));
+  const byCatalogId = new Map(immutableWhales.map((whale) => [whale.catalogId, whale]));
   if (byCatalogId.size !== expectedCatalogIds.size) invalidRelease();
   for (const catalogId of expectedCatalogIds) {
     if (!byCatalogId.has(catalogId)) invalidRelease();
   }
-  return byCatalogId;
+  return Object.freeze({
+    get: (catalogId: string): CanonicalWhale | undefined => byCatalogId.get(catalogId),
+  });
 }
 
 export async function validateIdentifierCatalogInventory(
@@ -116,7 +123,7 @@ export async function validateIdentifierCatalogInventory(
   });
   return Object.freeze({
     entries,
-    whalesByCatalogId: canonicalWhaleMap(whales, catalogIds),
+    whalesByCatalogId: canonicalWhaleLookup(whales, catalogIds),
   });
 }
 
