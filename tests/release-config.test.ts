@@ -105,6 +105,16 @@ describe('release configuration', () => {
     expect(deployment).toContain('on-device container smoke');
   });
 
+  it('generates the host Prisma client before the on-device fixture seeder runs', () => {
+    const workflow = readRepositoryFile('.github/workflows/ci.yml');
+    const containerSmoke = workflow.slice(workflow.indexOf('  container-smoke:'));
+    const generateClient = containerSmoke.indexOf('- run: pnpm db:generate');
+    const seedRelease = containerSmoke.indexOf('pnpm ci:seed-identifier-release');
+
+    expect(generateClient).toBeGreaterThan(-1);
+    expect(seedRelease).toBeGreaterThan(generateClient);
+  });
+
   it('documents fail-closed startup migrations for the Render Free release path', () => {
     const readme = readRepositoryFile('README.md');
     const deployment = readRepositoryFile('docs/deployment.md');
