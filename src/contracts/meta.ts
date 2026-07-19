@@ -1,11 +1,22 @@
 import { z } from 'zod';
 import { IsoDateTimeSchema } from './common.js';
 
+export const IdentificationModeSchema = z.enum(['disabled', 'on-device', 'server']);
+
 export const CapabilitiesSchema = z.object({
   accounts: z.boolean(),
   identification: z.boolean(),
+  identificationMode: IdentificationModeSchema,
   submissions: z.boolean(),
-}).strict();
+}).strict().superRefine((capabilities, context) => {
+  if (capabilities.identification !== (capabilities.identificationMode !== 'disabled')) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'identification must match identificationMode availability',
+      path: ['identification'],
+    });
+  }
+});
 
 export const HealthSchema = z.object({
   status: z.literal('ok'),
@@ -35,6 +46,7 @@ export const SafeErrorSchema = z.object({
 }).strict();
 
 export type Capabilities = z.infer<typeof CapabilitiesSchema>;
+export type IdentificationMode = z.infer<typeof IdentificationModeSchema>;
 export type Health = z.infer<typeof HealthSchema>;
 export type Readiness = z.infer<typeof ReadinessSchema>;
 export type SafeError = z.infer<typeof SafeErrorSchema>;
@@ -44,6 +56,7 @@ export const RELEASE_A_CAPABILITIES: Readonly<Capabilities> = Object.freeze(
   CapabilitiesSchema.parse({
     accounts: false,
     identification: false,
+    identificationMode: 'disabled',
     submissions: false,
   }),
 );

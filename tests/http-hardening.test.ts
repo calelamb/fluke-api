@@ -24,6 +24,7 @@ const { buildApp } = await import('../src/app.js');
 const RELEASE_A_FEATURES = Object.freeze({
   accounts: false,
   identification: false,
+  identificationMode: 'disabled' as const,
   submissions: false,
 });
 let apps: readonly Awaited<ReturnType<typeof buildApp>>[] = [];

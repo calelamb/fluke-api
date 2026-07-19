@@ -180,12 +180,12 @@ jobs:
             accounts=true
             submissions=true
             acknowledgement=true
-            expected='{"accounts":true,"identification":false,"submissions":true}'
+            expected='{"accounts":true,"identification":false,"identificationMode":"disabled","submissions":true}'
           else
             accounts=false
             submissions=false
             acknowledgement=false
-            expected='{"accounts":false,"identification":false,"submissions":false}'
+            expected='{"accounts":false,"identification":false,"identificationMode":"disabled","submissions":false}'
           fi
           docker run --detach --name fluke-api-ci --network host \
             --add-host objects.ci.invalid:8.8.8.8 \
@@ -207,7 +207,7 @@ jobs:
             -e APPLE_KEY_ID=ABC123DEFG \
             -e ENABLE_ACCOUNTS="$accounts" \
             -e ENABLE_SUBMISSIONS="$submissions" \
-            -e ENABLE_IDENTIFY=false \
+            -e IDENTIFIER_MODE=disabled \
             -e PRODUCTION_MUTATIONS_ACK="$acknowledgement" \
             fluke-api:ci
           for attempt in {1..30}; do

@@ -55,6 +55,7 @@ describe('observer release security gates', () => {
       ENABLE_ACCOUNTS: false,
       ENABLE_IDENTIFY: false,
       ENABLE_SUBMISSIONS: false,
+      IDENTIFIER_MODE: 'disabled',
       NODE_ENV: 'test',
       STORAGE_BACKEND: 'local',
     });
@@ -80,7 +81,9 @@ describe('observer release security gates', () => {
     const workflow = readRepositoryFile('.github/workflows/ci.yml');
 
     expect(workflow).toContain('mode: [release-a, release-b]');
-    expect(workflow).toContain(`'{"accounts":true,"identification":false,"submissions":true}'`);
+    expect(workflow).toContain(
+      `'{"accounts":true,"identification":false,"identificationMode":"disabled","submissions":true}'`,
+    );
     expect(workflow).toContain("= '404'");
   });
 

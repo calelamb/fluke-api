@@ -27,7 +27,8 @@ describe('production scheduled-job workflow', () => {
     expect(workflow).toContain('DIRECT_URL: ${{ secrets.PRODUCTION_DIRECT_URL }}');
     expect(workflow).toContain('JWT_SECRET: ${{ secrets.SCHEDULED_JOB_JWT_SECRET }}');
     expect(workflow).toContain('ENABLE_ACCOUNTS: "false"');
-    expect(workflow).toContain('ENABLE_IDENTIFY: "false"');
+    expect(workflow).toContain('IDENTIFIER_MODE: "disabled"');
+    expect(workflow).not.toContain('ENABLE_IDENTIFY:');
     expect(workflow).toContain('ENABLE_SUBMISSIONS: "false"');
     expect(workflow).not.toContain('pull_request:');
   });

@@ -57,6 +57,7 @@ export interface ObserverAuthDependencies {
 
 export interface BuildAppOptions {
   readonly features?: FeatureConfig;
+  readonly onDeviceReadinessProbes?: OnDeviceReadinessProbes;
   readonly publicReadRateLimitMax?: number;
   readonly publicReadTimeoutMs?: number;
   readonly readinessProbe?: ReadinessProbe;
@@ -64,6 +65,12 @@ export interface BuildAppOptions {
   readonly storageEndpointResolver?: EndpointResolver;
   readonly silent?: boolean;
   readonly trustProxy?: false | 1;
+}
+
+export interface OnDeviceReadinessProbes {
+  readonly activeRelease: () => Promise<boolean>;
+  readonly feed: () => Promise<void>;
+  readonly submission: () => Promise<void>;
 }
 
 const READINESS_TIMEOUT_MS = 5_000;
@@ -173,8 +180,70 @@ async function defaultReadinessProbe(): Promise<void> {
   );
 }
 
+async function defaultActiveReleaseProbe(): Promise<boolean> {
+  const activeCount = await boundedDatabaseRead(
+    prisma,
+    (transaction) => transaction.identifierRelease.count({ where: { status: 'ACTIVE' } }),
+    AbortSignal.timeout(READINESS_TIMEOUT_MS),
+    READINESS_TIMEOUT_MS,
+  );
+  return activeCount === 1;
+}
+
+async function defaultFeedProbe(): Promise<void> {
+  await boundedDatabaseRead(
+    prisma,
+    async (transaction) => {
+      await Promise.all([
+        transaction.sighting.findFirst({ select: { publicFeedRevision: true } }),
+        transaction.externalSighting.findFirst({ select: { publicFeedRevision: true } }),
+      ]);
+    },
+    AbortSignal.timeout(READINESS_TIMEOUT_MS),
+    READINESS_TIMEOUT_MS,
+  );
+}
+
+async function defaultSubmissionProbe(): Promise<void> {
+  await boundedDatabaseRead(
+    prisma,
+    async (transaction) => {
+      await transaction.submissionIdempotency.findFirst({ select: { id: true } });
+    },
+    AbortSignal.timeout(READINESS_TIMEOUT_MS),
+    READINESS_TIMEOUT_MS,
+  );
+}
+
+const environmentOnDeviceReadinessProbes = Object.freeze({
+  activeRelease: defaultActiveReleaseProbe,
+  feed: defaultFeedProbe,
+  submission: defaultSubmissionProbe,
+});
+
+export function composeReadinessProbe(
+  baseProbe: ReadinessProbe,
+  features: FeatureConfig,
+  probes: OnDeviceReadinessProbes,
+): ReadinessProbe {
+  if (features.identificationMode !== 'on-device') return baseProbe;
+  return async () => {
+    await baseProbe();
+    if (!await probes.activeRelease()) {
+      throw new Error('No certified ACTIVE identifier release');
+    }
+    await probes.feed();
+    await probes.submission();
+  };
+}
+
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
   const resolvedFeatures = validateFeatureConfig(options.features ?? environmentFeatures);
+  const readinessProbe = composeReadinessProbe(
+    options.readinessProbe ?? defaultReadinessProbe,
+    resolvedFeatures,
+    options.onDeviceReadinessProbes ?? environmentOnDeviceReadinessProbes,
+  );
   const environmentObserverAuth = options.observerAuth === undefined && resolvedFeatures.accounts
     ? environmentObserverAuthDependencies()
     : undefined;
@@ -188,7 +257,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       options.publicReadTimeoutMs ?? PUBLIC_READ_TIMEOUT_MS,
       'publicReadTimeoutMs',
     ),
-    readinessProbe: options.readinessProbe ?? defaultReadinessProbe,
+    readinessProbe,
     observerAuth: options.observerAuth ?? environmentObserverAuth,
     storageEndpointResolver: options.storageEndpointResolver,
     silent: options.silent ?? false,
@@ -200,7 +269,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     throw new Error('Production observer accounts require configured authentication dependencies');
   }
   const requiresObjectStorage = resolvedOptions.features.accounts
-    || resolvedOptions.features.identification
+    || resolvedOptions.features.identificationMode === 'server'
     || resolvedOptions.features.submissions;
   if (requiresObjectStorage && env.STORAGE_BACKEND === 's3') {
     await assertPublicEndpointResolution(
@@ -334,7 +403,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   });
   await app.register(sensible);
   const requiresMultipart = resolvedOptions.features.accounts
-    || resolvedOptions.features.identification
+    || resolvedOptions.features.identificationMode === 'server'
     || resolvedOptions.features.submissions;
   if (requiresMultipart) {
     await app.register(multipart, {
@@ -377,7 +446,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await app.register(historicalSightingsRoutes, boundedReadOptions);
   await app.register(externalSightingsRoutes, boundedReadOptions);
   await app.register(predictRoutes, boundedReadOptions);
-  await app.register(identifierReleaseRoutes, boundedReadOptions);
+  if (resolvedOptions.features.identificationMode !== 'disabled') {
+    await app.register(identifierReleaseRoutes, boundedReadOptions);
+  }
   if (resolvedOptions.features.submissions) {
     await app.register(sightingSubmissionRoutes, { prefix: '/api/v1' });
   }
@@ -392,7 +463,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       submissions: resolvedOptions.features.submissions,
     });
   }
-  if (resolvedOptions.features.identification) {
+  if (resolvedOptions.features.identificationMode === 'server') {
     await app.register(identifyRoutes, { prefix: '/api/v1' });
   }
   if (resolvedOptions.features.accounts) {

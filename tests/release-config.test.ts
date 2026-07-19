@@ -229,7 +229,7 @@ describe('release configuration', () => {
     expect(entrypoint).toContain('process.exit(1)');
   });
 
-  it('documents the same-SHA observer launch sequence and identify stop gate', () => {
+  it('documents the same-SHA observer and on-device identifier launch sequence', () => {
     const deployment = readRepositoryFile('docs/deployment.md');
 
     expectInOrder(deployment, [
@@ -239,6 +239,8 @@ describe('release configuration', () => {
       '## Safe all-off deploy',
       '## Enable observer launch state',
       '## Physical TestFlight Apple gate',
+      '## Accept the certified identifier release',
+      '## Enable on-device identification',
     ]);
     for (const gate of [
       'GitHub Actions commit SHA must equal the Render source commit SHA',
@@ -248,14 +250,23 @@ describe('release configuration', () => {
       '/api/v1/health',
       'physical TestFlight device',
       'PRODUCTION_MUTATIONS_ACK=true',
-      '{"accounts":true,"identification":false,"submissions":true}',
+      '{"accounts":true,"identification":false,"identificationMode":"disabled","submissions":true}',
+      'external verifier',
+      'ready:true',
+      'status `ACTIVE`',
+      'IDENTIFIER_MODE=on-device',
+      '{"accounts":true,"identification":true,"identificationMode":"on-device","submissions":true}',
+      'GET /api/v1/sighting-feed',
+      'POST /api/v1/sightings',
+      'GET /api/v1/identifier/releases/current',
       'media survives an API redeploy',
     ]) {
       expect(deployment).toContain(gate);
     }
     expect(deployment).toContain('ENABLE_SUBMISSIONS=true');
-    expect(deployment).toContain('ENABLE_IDENTIFY=false');
+    expect(deployment).toContain('IDENTIFIER_MODE=disabled');
     expect(deployment).toContain('POST /api/v1/identify must return 404');
+    expect(deployment).not.toMatch(/^IDENTIFIER_MODE=server$/mu);
     expect(deployment).toContain('Render Free');
     expect(deployment).toContain('Do not upgrade');
   });
@@ -299,7 +310,7 @@ describe('release configuration', () => {
     expectInOrder(rollback, [
       'ENABLE_ACCOUNTS=false',
       'ENABLE_SUBMISSIONS=false',
-      'ENABLE_IDENTIFY=false',
+      'IDENTIFIER_MODE=disabled',
       'redeploy',
       'return 404',
       'preserve the database and private object bucket',
@@ -334,7 +345,7 @@ describe('release configuration', () => {
 
     expectInOrder(drill, [
       '## Mandatory rollback drill',
-      '{"accounts":false,"identification":false,"submissions":false}',
+      '{"accounts":false,"identification":false,"identificationMode":"disabled","submissions":false}',
       'canonical `404`',
       'healthy browse',
       'controlled same-commit re-enable',

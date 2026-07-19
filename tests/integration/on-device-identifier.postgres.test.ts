@@ -262,7 +262,12 @@ describe.runIf(postgresEnabled)('on-device identifier persistence against Postgr
     });
     const { buildApp } = await import('../../src/app.js');
     const app = await buildApp({
-      features: { accounts: false, identification: false, submissions: true },
+      features: {
+        accounts: false,
+        identification: true,
+        identificationMode: 'on-device',
+        submissions: true,
+      },
       silent: true,
     });
 
@@ -277,6 +282,38 @@ describe.runIf(postgresEnabled)('on-device identifier persistence against Postgr
       expect(createdBody.identificationSuggestionId).toMatch(/^[0-9a-f-]{36}$/u);
       await expectStoredRouteSuggestion(prisma, createdBody);
       await expectIdempotentRouteReplay(app, prisma, createdBody);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('requires one ACTIVE release plus healthy feed and submission dependencies for readiness', async () => {
+    const { buildApp } = await import('../../src/app.js');
+    const app = await buildApp({
+      features: {
+        accounts: false,
+        identification: true,
+        identificationMode: 'on-device',
+        submissions: true,
+      },
+      silent: true,
+    });
+
+    try {
+      const unavailable = await app.inject({ method: 'GET', url: '/api/v1/ready' });
+      expect(unavailable.statusCode).toBe(503);
+
+      await prisma.identifierRelease.create({
+        data: releaseFixture(fixture.activeManifestVersion, 'ACTIVE', 1n),
+      });
+      const ready = await app.inject({ method: 'GET', url: '/api/v1/ready' });
+      const release = await app.inject({
+        method: 'GET', url: '/api/v1/identifier/releases/current',
+      });
+
+      expect(ready.statusCode).toBe(200);
+      expect(release.statusCode).toBe(200);
+      expect(release.json()).toMatchObject({ manifestVersion: fixture.activeManifestVersion });
     } finally {
       await app.close();
     }

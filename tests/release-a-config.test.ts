@@ -84,7 +84,39 @@ describe('Release A environment configuration', () => {
       ENABLE_ACCOUNTS: false,
       ENABLE_IDENTIFY: false,
       ENABLE_SUBMISSIONS: false,
+      IDENTIFIER_MODE: 'disabled',
     });
+  });
+
+  it.each([
+    ['true', 'server'],
+    ['false', 'disabled'],
+  ] as const)('maps legacy ENABLE_IDENTIFY=%s to %s mode', (legacy, mode) => {
+    expect(parseEnv({
+      ...REQUIRED_ENV,
+      ENABLE_IDENTIFY: legacy,
+      NODE_ENV: 'test',
+    }).IDENTIFIER_MODE).toBe(mode);
+  });
+
+  it.each(['disabled', 'on-device', 'server'] as const)(
+    'accepts explicit IDENTIFIER_MODE=%s without the legacy flag',
+    (mode) => {
+      expect(parseEnv({
+        ...REQUIRED_ENV,
+        IDENTIFIER_MODE: mode,
+        NODE_ENV: 'test',
+      }).IDENTIFIER_MODE).toBe(mode);
+    },
+  );
+
+  it('rejects conflicting explicit and legacy identifier configuration', () => {
+    expect(() => parseEnv({
+      ...REQUIRED_ENV,
+      ENABLE_IDENTIFY: 'false',
+      IDENTIFIER_MODE: 'on-device',
+      NODE_ENV: 'test',
+    })).toThrow(/IDENTIFIER_MODE.*ENABLE_IDENTIFY/u);
   });
 
   it('parses only explicit true and false feature values', () => {
@@ -180,12 +212,14 @@ describe('Release A environment configuration', () => {
     });
   });
 
-  it('documents the three disabled-by-default Release A flags', () => {
+  it('documents explicit identifier mode with the legacy migration mapping', () => {
     const example = readRepositoryFile('.env.example');
 
     expect(example).toContain('ENABLE_SUBMISSIONS="false"');
     expect(example).toContain('ENABLE_ACCOUNTS="false"');
-    expect(example).toContain('ENABLE_IDENTIFY="false"');
+    expect(example).toContain('IDENTIFIER_MODE="disabled"');
+    expect(example).toContain('ENABLE_IDENTIFY=true maps to server');
+    expect(example).not.toMatch(/^ENABLE_IDENTIFY=/mu);
   });
 
   it('smokes the production container with explicit safe public origins', () => {

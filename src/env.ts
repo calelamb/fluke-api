@@ -28,6 +28,8 @@ const featureFlag = z
   .default('false')
   .transform((value) => value === 'true');
 
+const identifierMode = z.enum(['disabled', 'on-device', 'server']);
+
 const tokenEncryptionKey = z.string().refine((value) => {
   if (!STANDARD_BASE64_PATTERN.test(value) || value.length % 4 !== 0) {
     return false;
@@ -91,7 +93,8 @@ const envSchema = z
     WEB_ORIGIN: originList.default(DEVELOPMENT_WEB_ORIGINS),
     ENABLE_SUBMISSIONS: featureFlag,
     ENABLE_ACCOUNTS: featureFlag,
-    ENABLE_IDENTIFY: featureFlag,
+    ENABLE_IDENTIFY: featureFlag.optional(),
+    IDENTIFIER_MODE: identifierMode.optional(),
     PRODUCTION_MUTATIONS_ACK: featureFlag,
 
     APPLE_CLIENT_ID: z.literal('app.fluke.Fluke').optional(),
@@ -193,6 +196,25 @@ const envSchema = z
         }
       }
     }
+    if (value.IDENTIFIER_MODE !== undefined && value.ENABLE_IDENTIFY !== undefined) {
+      const legacyMode = value.ENABLE_IDENTIFY ? 'server' : 'disabled';
+      if (value.IDENTIFIER_MODE !== legacyMode) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['IDENTIFIER_MODE'],
+          message: 'IDENTIFIER_MODE conflicts with legacy ENABLE_IDENTIFY; remove the legacy flag',
+        });
+      }
+    }
+  })
+  .transform((value) => {
+    const resolvedMode = value.IDENTIFIER_MODE
+      ?? (value.ENABLE_IDENTIFY === true ? 'server' : 'disabled');
+    return Object.freeze({
+      ...value,
+      ENABLE_IDENTIFY: value.ENABLE_IDENTIFY ?? false,
+      IDENTIFIER_MODE: resolvedMode,
+    });
   });
 
 export type Env = z.infer<typeof envSchema>;
@@ -273,8 +295,13 @@ function productionIssues(input: NodeJS.ProcessEnv, parsed: Env): readonly strin
     }
   }
 
-  if (parsed.ENABLE_IDENTIFY) {
-    issues.push('ENABLE_IDENTIFY: must remain false in production');
+  if (parsed.IDENTIFIER_MODE === 'server') {
+    issues.push(
+      'IDENTIFIER_MODE: server is not allowed in production; legacy ENABLE_IDENTIFY must remain false',
+    );
+  }
+  if (parsed.IDENTIFIER_MODE === 'on-device' && !parsed.ENABLE_SUBMISSIONS) {
+    issues.push('IDENTIFIER_MODE: on-device production requires submissions');
   }
   if (parsed.ENABLE_ACCOUNTS !== parsed.ENABLE_SUBMISSIONS) {
     issues.push(

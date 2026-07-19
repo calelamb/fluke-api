@@ -41,7 +41,12 @@ describe('observer storage dependency integration', () => {
 
   beforeAll(async () => {
     app = await buildApp({
-      features: { accounts: true, identification: false, submissions: true },
+      features: {
+        accounts: true,
+        identification: false,
+        identificationMode: 'disabled',
+        submissions: true,
+      },
       observerAuth: {
         appleAuth: {
           exchangeAppleAuthorizationCode: vi.fn(),
