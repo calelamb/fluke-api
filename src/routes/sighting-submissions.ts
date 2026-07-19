@@ -11,6 +11,7 @@ import {
   isPrismaReplayRace,
 } from '../lib/idempotency.js';
 import { resolveOptionalObserver, type ObserverPrincipal } from '../lib/observer-auth.js';
+import { resolveLocalSuggestion } from '../services/local-identification.js';
 
 /**
  * Photo-upload tokens are scoped to a specific sighting and to the
@@ -34,11 +35,15 @@ const notImplemented = Object.freeze({
 
 interface ReplayRecord {
   readonly requestHash: string;
-  readonly sighting: { readonly id: string };
+  readonly sighting: {
+    readonly id: string;
+    readonly identificationSuggestion: { readonly id: string } | null;
+  };
 }
 
 interface SubmissionResult {
   readonly created: boolean;
+  readonly identificationSuggestionId: string | null;
   readonly sighting: { readonly id: string };
 }
 
@@ -56,7 +61,11 @@ function validateHeaderIdempotencyKey(
 
 function resolveReplay(record: ReplayRecord, requestHash: string): SubmissionResult {
   if (record.requestHash !== requestHash) throw new IdempotencyConflictError();
-  return Object.freeze({ created: false, sighting: record.sighting });
+  return Object.freeze({
+    created: false,
+    identificationSuggestionId: record.sighting.identificationSuggestion?.id ?? null,
+    sighting: { id: record.sighting.id },
+  });
 }
 
 function sightingData(
@@ -88,9 +97,17 @@ async function createOrReplaySubmission(
       return await prisma.$transaction(async (transaction) => {
         const existing = await transaction.submissionIdempotency.findUnique({
           where: { keyHash: hashes.keyHash },
-          select: { requestHash: true, sighting: { select: { id: true } } },
+          select: {
+            requestHash: true,
+            sighting: {
+              select: { id: true, identificationSuggestion: { select: { id: true } } },
+            },
+          },
         });
         if (existing !== null) return resolveReplay(existing, hashes.requestHash);
+        const resolvedSuggestion = body.localIdentification === undefined
+          ? null
+          : await resolveLocalSuggestion(transaction, body.localIdentification, new Date());
         const sighting = await transaction.sighting.create({ data: sightingData(body, observer) });
         await transaction.submissionIdempotency.create({
           data: {
@@ -100,13 +117,32 @@ async function createOrReplaySubmission(
             userId: observer?.id,
           },
         });
-        return Object.freeze({ created: true, sighting: { id: sighting.id } });
+        const suggestion = resolvedSuggestion === null
+          ? null
+          : await transaction.sightingIdentificationSuggestion.create({
+              data: {
+                ...resolvedSuggestion,
+                matchedReferencePhotoIds: [...resolvedSuggestion.matchedReferencePhotoIds],
+                sightingId: sighting.id,
+              },
+              select: { id: true },
+            });
+        return Object.freeze({
+          created: true,
+          identificationSuggestionId: suggestion?.id ?? null,
+          sighting: { id: sighting.id },
+        });
       }, { isolationLevel: 'Serializable' });
     } catch (error: unknown) {
       if (!isPrismaReplayRace(error)) throw error;
       const winner = await prisma.submissionIdempotency.findUnique({
         where: { keyHash: hashes.keyHash },
-        select: { requestHash: true, sighting: { select: { id: true } } },
+        select: {
+          requestHash: true,
+          sighting: {
+            select: { id: true, identificationSuggestion: { select: { id: true } } },
+          },
+        },
       });
       if (winner !== null) return resolveReplay(winner, hashes.requestHash);
       if (attempt === SERIALIZABLE_ATTEMPTS) throw error;
@@ -154,6 +190,7 @@ const sightingSubmissionRoutes: FastifyPluginAsync = async (fastify) => {
       const responseBody: SubmitSightingResponse = {
         ok: true,
         id: result.sighting.id,
+        identificationSuggestionId: result.identificationSuggestionId,
         photoUploadToken,
       };
       return reply.code(result.created ? 201 : 200).send(responseBody);

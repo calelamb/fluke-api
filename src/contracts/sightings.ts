@@ -29,6 +29,24 @@ const IdentifiedWhaleSchema = z.object({
   confidence: IdConfidenceSchema,
 });
 
+export const LocalIdentificationSuggestionSchema = z.object({
+  catalogId: StableIdSchema,
+  similarityScore: z.number().finite().min(-1).max(1),
+  scoreSemantics: z.literal('uncalibrated_similarity_not_probability'),
+  manifestVersion: StableIdSchema,
+  modelVersion: StableIdSchema,
+  indexVersion: StableIdSchema,
+  matchedReferencePhotoIds: z.array(StableIdSchema).max(5),
+}).strict().superRefine((value, context) => {
+  if (new Set(value.matchedReferencePhotoIds).size !== value.matchedReferencePhotoIds.length) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'matched reference photo IDs must be unique',
+      path: ['matchedReferencePhotoIds'],
+    });
+  }
+});
+
 export const SightingSchema = z.object({
   id: StableIdSchema,
   observedAt: IsoDateTimeSchema,
@@ -72,6 +90,7 @@ export const SubmitSightingPayloadSchema = z.object({
   behaviorNotes: z.string().max(2000).nullable().optional(),
   observerName: z.string().max(120).nullable().optional(),
   observerEmail: z.string().email().max(200),
+  localIdentification: LocalIdentificationSuggestionSchema.optional(),
 }).strict();
 
 export const MySightingSchema = z.object({
@@ -97,8 +116,9 @@ export const MySightingPageSchema = z.object({
 export const SubmitSightingResponseSchema = z.object({
   ok: z.literal(true),
   id: z.string(),
+  identificationSuggestionId: z.string().nullable(),
   photoUploadToken: z.string(),
-});
+}).strict();
 
 export const ExternalSightingSchema = z.object({
   id: StableIdSchema,
@@ -190,6 +210,7 @@ export type SightingDTO = z.infer<typeof SightingSchema>;
 export type PendingSightingDTO = z.infer<typeof PendingSightingSchema>;
 export type SubmitSightingPayload = z.infer<typeof SubmitSightingPayloadSchema>;
 export type SubmitSightingResponse = z.infer<typeof SubmitSightingResponseSchema>;
+export type LocalIdentificationSuggestion = z.infer<typeof LocalIdentificationSuggestionSchema>;
 export type MySighting = z.infer<typeof MySightingSchema>;
 export type MySightingPage = z.infer<typeof MySightingPageSchema>;
 export type ExternalSightingDTO = z.infer<typeof ExternalSightingSchema>;

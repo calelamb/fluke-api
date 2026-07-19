@@ -16,6 +16,8 @@ vi.mock('../db.js', () => {
       update: vi.fn(),
     },
     sightingWhale: { upsert: vi.fn() },
+    identifierRelease: { findUnique: vi.fn() },
+    sightingIdentificationSuggestion: { create: vi.fn() },
     submissionIdempotency: {
       create: vi.fn(),
       findUnique: vi.fn(),
@@ -187,6 +189,38 @@ describe('sightings routes', () => {
       observerEmail: 'observer@example.com',
     };
 
+    const localIdentification = Object.freeze({
+      catalogId: 'J35',
+      indexVersion: 'pnw-reference-v1',
+      manifestVersion: 'ios-identifier-v1',
+      matchedReferencePhotoIds: Object.freeze(['reference-photo-left']),
+      modelVersion: 'dinov2-coreml-v1',
+      scoreSemantics: 'uncalibrated_similarity_not_probability',
+      similarityScore: 0.8123456,
+    });
+
+    const validRelease = Object.freeze({
+      catalogInventory: Object.freeze([
+        Object.freeze({ catalogId: 'J35', referencePhotoId: 'reference-photo-left' }),
+        Object.freeze({ catalogId: 'J35', referencePhotoId: 'reference-photo-right' }),
+      ]),
+      indexVersion: localIdentification.indexVersion,
+      modelVersion: localIdentification.modelVersion,
+      scoreSemantics: localIdentification.scoreSemantics,
+      status: 'ACTIVE',
+      suggestionsAcceptedUntil: null,
+    });
+
+    function configureValidLocalSuggestion(): void {
+      vi.mocked(prisma.identifierRelease.findUnique).mockResolvedValue(validRelease as never);
+      vi.mocked(prisma.whale.findMany).mockResolvedValue([
+        { catalogId: 'J35', id: 'canonical-whale-j35' },
+      ] as never);
+      vi.mocked(prisma.sightingIdentificationSuggestion.create).mockResolvedValue({
+        id: '8939c867-a31b-4244-8580-bb84ae822208',
+      } as never);
+    }
+
     it('creates a new sighting with PENDING status and returns a photo-upload token', async () => {
       vi.mocked(prisma.sighting.create).mockResolvedValue({ id: 'new-sighting-id' } as never);
       vi.mocked(prisma.submissionIdempotency.findUnique).mockResolvedValue(null);
@@ -198,9 +232,15 @@ describe('sightings routes', () => {
       });
 
       expect(response.statusCode).toBe(201);
-      const body = response.json<{ ok: true; id: string; photoUploadToken: string }>();
+      const body = response.json<{
+        identificationSuggestionId: string | null;
+        id: string;
+        ok: true;
+        photoUploadToken: string;
+      }>();
       expect(body.ok).toBe(true);
       expect(body.id).toBe('new-sighting-id');
+      expect(body.identificationSuggestionId).toBeNull();
       expect(body.photoUploadToken).toBeTypeOf('string');
       expect(body.photoUploadToken.length).toBeGreaterThan(0);
       // Verify the token round-trips and carries the expected claims.
@@ -217,6 +257,210 @@ describe('sightings routes', () => {
         }),
       );
       expect(prisma.submissionIdempotency.create).toHaveBeenCalledTimes(1);
+      expect(prisma.sightingIdentificationSuggestion.create).not.toHaveBeenCalled();
+      expect(prisma.sightingWhale.upsert).not.toHaveBeenCalled();
+    });
+
+    it('stores a valid local suggestion atomically without creating a whale link', async () => {
+      configureValidLocalSuggestion();
+      vi.mocked(prisma.sighting.create).mockResolvedValue({ id: 'suggested-sighting' } as never);
+      vi.mocked(prisma.submissionIdempotency.findUnique).mockResolvedValue(null);
+
+      const response = await app.inject({
+        method: 'POST',
+        payload: { ...validBody, localIdentification },
+        remoteAddress: '127.0.0.30',
+        url: '/api/v1/sightings',
+      });
+
+      expect(response.statusCode).toBe(201);
+      expect(response.json<{ identificationSuggestionId: string }>()
+        .identificationSuggestionId).toBe('8939c867-a31b-4244-8580-bb84ae822208');
+      expect(prisma.sightingIdentificationSuggestion.create).toHaveBeenCalledWith({
+        data: {
+          matchedReferencePhotoIds: ['reference-photo-left'],
+          releaseManifestVersion: 'ios-identifier-v1',
+          scoreSemantics: 'uncalibrated_similarity_not_probability',
+          sightingId: 'suggested-sighting',
+          similarityScore: 0.8123456,
+          status: 'PENDING',
+          whaleId: 'canonical-whale-j35',
+        },
+        select: { id: true },
+      });
+      expect(prisma.sightingWhale.upsert).not.toHaveBeenCalled();
+      expect(vi.mocked(prisma.$transaction).mock.calls.at(-1)?.[1])
+        .toEqual({ isolationLevel: 'Serializable' });
+    });
+
+    it('accepts a release only before its explicit acceptance deadline', async () => {
+      configureValidLocalSuggestion();
+      vi.mocked(prisma.identifierRelease.findUnique).mockResolvedValue({
+        ...validRelease,
+        status: 'ACCEPTED',
+        suggestionsAcceptedUntil: new Date('2099-01-01T00:00:00.000Z'),
+      } as never);
+      vi.mocked(prisma.sighting.create).mockResolvedValue({ id: 'accepted-release-sighting' } as never);
+      vi.mocked(prisma.submissionIdempotency.findUnique).mockResolvedValue(null);
+
+      const response = await app.inject({
+        method: 'POST',
+        payload: { ...validBody, localIdentification },
+        remoteAddress: '127.0.0.31',
+        url: '/api/v1/sightings',
+      });
+
+      expect(response.statusCode).toBe(201);
+      expect(prisma.sightingIdentificationSuggestion.create).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ['unknown', null],
+      ['revoked', { ...validRelease, status: 'REVOKED' }],
+      ['expired', {
+        ...validRelease,
+        status: 'ACCEPTED',
+        suggestionsAcceptedUntil: new Date('2020-01-01T00:00:00.000Z'),
+      }],
+      ['accepted without a deadline', {
+        ...validRelease,
+        status: 'ACCEPTED',
+        suggestionsAcceptedUntil: null,
+      }],
+    ])('rejects a %s identifier release with a safe 422', async (_state, release) => {
+      vi.mocked(prisma.identifierRelease.findUnique).mockResolvedValue(release as never);
+      vi.mocked(prisma.submissionIdempotency.findUnique).mockResolvedValue(null);
+
+      const response = await app.inject({
+        method: 'POST',
+        payload: { ...validBody, localIdentification },
+        remoteAddress: `127.0.1.${vi.mocked(prisma.$transaction).mock.calls.length + 1}`,
+        url: '/api/v1/sightings',
+      });
+
+      expect(response.statusCode).toBe(422);
+      expect(SafeErrorSchema.parse(response.json())).toMatchObject({
+        code: 'VALIDATION_ERROR',
+        retryable: false,
+      });
+      expect(response.body).not.toContain(localIdentification.manifestVersion);
+      expect(response.body).not.toContain(localIdentification.catalogId);
+      expect(response.body).not.toContain('INVALID_IDENTIFICATION_RELEASE');
+      expect(prisma.sighting.create).not.toHaveBeenCalled();
+      expect(prisma.submissionIdempotency.create).not.toHaveBeenCalled();
+      expect(prisma.sightingIdentificationSuggestion.create).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['model version', { modelVersion: 'wrong-model' }],
+      ['index version', { indexVersion: 'wrong-index' }],
+      ['score semantics', { scoreSemantics: 'probability' }],
+    ])('rejects mismatched %s evidence', async (_field, change) => {
+      configureValidLocalSuggestion();
+      vi.mocked(prisma.identifierRelease.findUnique).mockResolvedValue({
+        ...validRelease,
+        ...change,
+      } as never);
+      vi.mocked(prisma.submissionIdempotency.findUnique).mockResolvedValue(null);
+
+      const response = await app.inject({
+        method: 'POST',
+        payload: { ...validBody, localIdentification },
+        remoteAddress: `127.0.2.${vi.mocked(prisma.$transaction).mock.calls.length + 1}`,
+        url: '/api/v1/sightings',
+      });
+
+      expect(response.statusCode).toBe(422);
+      expect(prisma.sighting.create).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['catalog ID', { ...localIdentification, catalogId: 'K12' }],
+      ['reference ID', {
+        ...localIdentification,
+        matchedReferencePhotoIds: ['unregistered-reference'],
+      }],
+    ])('rejects a suggestion with an unregistered %s', async (_field, suggestion) => {
+      configureValidLocalSuggestion();
+      vi.mocked(prisma.submissionIdempotency.findUnique).mockResolvedValue(null);
+
+      const response = await app.inject({
+        method: 'POST',
+        payload: { ...validBody, localIdentification: suggestion },
+        remoteAddress: `127.0.3.${vi.mocked(prisma.$transaction).mock.calls.length + 1}`,
+        url: '/api/v1/sightings',
+      });
+
+      expect(response.statusCode).toBe(422);
+      expect(prisma.sightingIdentificationSuggestion.create).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['duplicate reference IDs', [
+        { catalogId: 'J35', referencePhotoId: 'duplicate-reference' },
+        { catalogId: 'J36', referencePhotoId: 'duplicate-reference' },
+      ]],
+      ['a catalog ID without a current canonical whale', [
+        { catalogId: 'J35', referencePhotoId: 'reference-photo-left' },
+        { catalogId: 'J36', referencePhotoId: 'reference-photo-right' },
+      ]],
+    ])('rejects release inventory with %s', async (_case, catalogInventory) => {
+      configureValidLocalSuggestion();
+      vi.mocked(prisma.identifierRelease.findUnique).mockResolvedValue({
+        ...validRelease,
+        catalogInventory,
+      } as never);
+      vi.mocked(prisma.whale.findMany).mockResolvedValue([
+        { catalogId: 'J35', id: 'canonical-whale-j35' },
+      ] as never);
+      vi.mocked(prisma.submissionIdempotency.findUnique).mockResolvedValue(null);
+
+      const response = await app.inject({
+        method: 'POST',
+        payload: {
+          ...validBody,
+          localIdentification: {
+            ...localIdentification,
+            matchedReferencePhotoIds: [catalogInventory[0].referencePhotoId],
+          },
+        },
+        remoteAddress: `127.0.5.${catalogInventory[0].referencePhotoId.length}`,
+        url: '/api/v1/sightings',
+      });
+
+      expect(response.statusCode).toBe(422);
+      expect(prisma.sighting.create).not.toHaveBeenCalled();
+    });
+
+    it.each(['embedding', 'clientWhaleName', 'frames', 'rawModelOutput'])(
+      'never accepts client-provided %s evidence',
+      async (forbiddenField) => {
+        const response = await app.inject({
+          method: 'POST',
+          payload: {
+            ...validBody,
+            localIdentification: { ...localIdentification, [forbiddenField]: 'private-data' },
+          },
+          remoteAddress: `127.0.4.${forbiddenField.length}`,
+          url: '/api/v1/sightings',
+        });
+
+        expect(response.statusCode).toBe(400);
+        expect(prisma.identifierRelease.findUnique).not.toHaveBeenCalled();
+        expect(prisma.sighting.create).not.toHaveBeenCalled();
+      },
+    );
+
+    it('rejects duplicate matched reference IDs at the request boundary', async () => {
+      const parsed = SubmitSightingPayloadSchema.safeParse({
+        ...validBody,
+        localIdentification: {
+          ...localIdentification,
+          matchedReferencePhotoIds: ['reference-photo-left', 'reference-photo-left'],
+        },
+      });
+
+      expect(parsed.success).toBe(false);
     });
 
     it('replays the original response without creating another sighting', async () => {
@@ -241,6 +485,63 @@ describe('sightings routes', () => {
       expect(response.statusCode).toBe(200);
       expect(response.json<{ id: string }>().id).toBe('original-sighting');
       expect(prisma.sighting.create).not.toHaveBeenCalled();
+    });
+
+    it('replays the original suggestion ID without creating duplicate evidence', async () => {
+      configureValidLocalSuggestion();
+      const payload = SubmitSightingPayloadSchema.parse({ ...validBody, localIdentification });
+      const { buildSubmissionHashes } = await import('../lib/idempotency.js');
+      const hashes = buildSubmissionHashes(payload, null);
+      vi.mocked(prisma.submissionIdempotency.findUnique).mockResolvedValue({
+        requestHash: hashes.requestHash,
+        sighting: {
+          id: 'original-suggested-sighting',
+          identificationSuggestion: { id: '8939c867-a31b-4244-8580-bb84ae822208' },
+        },
+      } as never);
+
+      const response = await app.inject({
+        method: 'POST',
+        payload,
+        remoteAddress: '127.0.0.40',
+        url: '/api/v1/sightings',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        id: 'original-suggested-sighting',
+        identificationSuggestionId: '8939c867-a31b-4244-8580-bb84ae822208',
+      });
+      expect(prisma.sighting.create).not.toHaveBeenCalled();
+      expect(prisma.sightingIdentificationSuggestion.create).not.toHaveBeenCalled();
+    });
+
+    it('includes the complete local suggestion in the idempotency identity', async () => {
+      configureValidLocalSuggestion();
+      const { buildSubmissionHashes } = await import('../lib/idempotency.js');
+      const original = SubmitSightingPayloadSchema.parse({ ...validBody, localIdentification });
+      const originalHashes = buildSubmissionHashes(original, null);
+      vi.mocked(prisma.submissionIdempotency.findUnique).mockResolvedValue({
+        requestHash: originalHashes.requestHash,
+        sighting: {
+          id: 'original-suggested-sighting',
+          identificationSuggestion: { id: '8939c867-a31b-4244-8580-bb84ae822208' },
+        },
+      } as never);
+
+      const response = await app.inject({
+        method: 'POST',
+        payload: {
+          ...validBody,
+          localIdentification: { ...localIdentification, similarityScore: 0.7 },
+        },
+        remoteAddress: '127.0.0.41',
+        url: '/api/v1/sightings',
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(prisma.sighting.create).not.toHaveBeenCalled();
+      expect(prisma.sightingIdentificationSuggestion.create).not.toHaveBeenCalled();
     });
 
     it('returns 409 for a changed payload with the same idempotency key', async () => {
