@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_EXTERNAL_PUBLIC_FEED_ID_LENGTH } from '../lib/public-feed-id.js';
 import {
   BoundedTextSchema,
   CursorSchema,
@@ -28,6 +29,87 @@ const IdentifiedWhaleSchema = z.object({
   name: BoundedTextSchema.nullable(),
   confidence: IdConfidenceSchema,
 });
+
+const PublicFeedIdSchema = z.string()
+  .min(1)
+  .max(MAX_EXTERNAL_PUBLIC_FEED_ID_LENGTH)
+  .regex(/\S/u);
+const PublicFeedRevisionSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+
+export const InternalSightingFeedItemSchema = z.object({
+  behaviorNotes: BoundedTextSchema.nullable(),
+  ecotypeGuess: EcotypeSchema.nullable(),
+  groupSize: GroupSizeSchema.nullable(),
+  id: PublicFeedIdSchema,
+  identifiedWhales: z.array(IdentifiedWhaleSchema).max(MAX_NESTED_ITEMS),
+  kind: z.literal('internal'),
+  latitude: LatitudeSchema,
+  locationName: BoundedTextSchema.nullable(),
+  longitude: LongitudeSchema,
+  observedAt: IsoDateTimeSchema,
+  photos: z.array(SightingPhotoSchema).max(MAX_NESTED_ITEMS),
+  revision: PublicFeedRevisionSchema,
+}).strict();
+
+export const ExternalSightingFeedItemSchema = z.object({
+  attribution: BoundedTextSchema,
+  ecotypeGuess: EcotypeSchema.nullable(),
+  groupSize: GroupSizeSchema.nullable(),
+  id: PublicFeedIdSchema,
+  kind: z.literal('external'),
+  latitude: LatitudeSchema,
+  longitude: LongitudeSchema,
+  notes: BoundedTextSchema.nullable(),
+  observedAt: IsoDateTimeSchema,
+  revision: PublicFeedRevisionSchema,
+  source: BoundedTextSchema,
+  sourceUrl: HttpUrlSchema.nullable(),
+  species: BoundedTextSchema,
+  trusted: z.boolean(),
+}).strict();
+
+export const RemovedSightingFeedItemSchema = z.object({
+  id: PublicFeedIdSchema,
+  kind: z.literal('removed'),
+  revision: PublicFeedRevisionSchema,
+}).strict();
+
+export const SightingFeedItemSchema = z.discriminatedUnion('kind', [
+  InternalSightingFeedItemSchema,
+  ExternalSightingFeedItemSchema,
+  RemovedSightingFeedItemSchema,
+]);
+
+export const ProviderFreshnessSchema = z.object({
+  expectedMaximumLag: z.number().int().positive().max(31 * 24 * 60 * 60),
+  lastAttemptAt: IsoDateTimeSchema.nullable(),
+  lastSuccessAt: IsoDateTimeSchema.nullable(),
+  provider: z.enum(['acartia', 'gbif']),
+  status: z.enum([
+    'NEVER_RUN',
+    'STARTED',
+    'SUCCEEDED',
+    'FAILED',
+    'SKIPPED_LOCKED',
+    'LEASE_LOST',
+  ]),
+}).strict();
+
+export const SightingFeedQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  pageCursor: CursorSchema.optional(),
+  syncCursor: CursorSchema.optional(),
+}).strict().refine((value) => !(value.pageCursor && value.syncCursor), {
+  message: 'pageCursor and syncCursor are mutually exclusive',
+});
+
+export const SightingFeedPageSchema = z.object({
+  hasMore: z.boolean(),
+  items: z.array(SightingFeedItemSchema).max(100),
+  pageCursor: CursorSchema.nullable(),
+  providers: z.array(ProviderFreshnessSchema).length(2),
+  syncCursor: CursorSchema,
+}).strict();
 
 export const LocalIdentificationSuggestionSchema = z.object({
   catalogId: StableIdSchema,
@@ -218,3 +300,6 @@ export type HistoricalSighting = z.infer<typeof HistoricalSightingSchema>;
 export type SightingPage = z.infer<typeof SightingPageSchema>;
 export type ExternalSightingPage = z.infer<typeof ExternalSightingPageSchema>;
 export type HistoricalSightingPage = z.infer<typeof HistoricalSightingPageSchema>;
+export type SightingFeedItem = z.infer<typeof SightingFeedItemSchema>;
+export type SightingFeedPage = z.infer<typeof SightingFeedPageSchema>;
+export type ProviderFreshness = z.infer<typeof ProviderFreshnessSchema>;

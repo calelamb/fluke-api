@@ -11,8 +11,10 @@
 import { z } from 'zod';
 import { MAX_URL_LENGTH } from '../contracts/common.js';
 import { fetchJsonWithRetry } from '../jobs/provider-client.js';
+import { ProviderExternalIdSchema } from './public-feed-id.js';
 
 const ACARTIA_CURRENT_URL = 'https://acartia.io/api/v1/sightings/current';
+const ACARTIA_CURRENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1_000;
 
 // The API returns numeric values as strings in many fields; coerce defensively.
 const AcartiaSightingSchema = z
@@ -33,6 +35,7 @@ const AcartiaSightingSchema = z
     trusted: z.union([z.boolean(), z.number()]).optional().default(0),
   })
   .passthrough();
+const AcartiaIdentitySchema = z.object({ ssemmi_id: z.string() }).passthrough();
 
 export type AcartiaSighting = z.infer<typeof AcartiaSightingSchema>;
 
@@ -186,6 +189,11 @@ export interface FetchOptions {
 export async function fetchAcartiaCurrent(
   options: FetchOptions = {},
 ): Promise<NormalizedExternalSighting[]> {
+  const snapshot = await fetchAcartiaSnapshot(options);
+  return [...snapshot.sightings];
+}
+
+export async function fetchAcartiaSnapshot(options: FetchOptions = {}) {
   const url = options.url ?? ACARTIA_CURRENT_URL;
   const json = await fetchJsonWithRetry(url, {
     attemptTimeoutMs: 10_000,
@@ -201,11 +209,27 @@ export async function fetchAcartiaCurrent(
   }
 
   const out: NormalizedExternalSighting[] = [];
+  const seenExternalIds = new Set<string>();
   for (const item of json) {
+    const identity = AcartiaIdentitySchema.safeParse(item);
+    if (identity.success) {
+      const externalId = ProviderExternalIdSchema.safeParse(identity.data.ssemmi_id.trim());
+      if (externalId.success) seenExternalIds.add(externalId.data);
+    }
     const parsed = AcartiaSightingSchema.safeParse(item);
     if (!parsed.success) continue;
     const normalized = normalizeAcartiaSighting(parsed.data);
     if (normalized) out.push(normalized);
   }
-  return out;
+  const observedTo = new Date();
+  return Object.freeze({
+    reconciliation: Object.freeze({
+      authoritative: true as const,
+      observedFrom: new Date(observedTo.getTime() - ACARTIA_CURRENT_WINDOW_MS),
+      observedTo,
+      seenExternalIds: Object.freeze([...seenExternalIds]),
+      source: 'acartia' as const,
+    }),
+    sightings: Object.freeze(out),
+  });
 }

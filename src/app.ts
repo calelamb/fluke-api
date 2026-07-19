@@ -41,6 +41,7 @@ import identifierReleaseRoutes from './routes/identifier-releases.js';
 import predictRoutes from './routes/predict.js';
 import sightingPhotosRoutes from './routes/sighting-photos.js';
 import sightingSubmissionRoutes from './routes/sighting-submissions.js';
+import sightingFeedRoutes from './routes/sighting-feed.js';
 import sightingsRoutes from './routes/sightings.js';
 import whalesRoutes from './routes/whales.js';
 import { AppleAuthService } from './services/apple-auth.js';
@@ -372,6 +373,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   });
   await app.register(whalesRoutes, boundedReadOptions);
   await app.register(sightingsRoutes, boundedReadOptions);
+  await app.register(sightingFeedRoutes, boundedReadOptions);
   await app.register(historicalSightingsRoutes, boundedReadOptions);
   await app.register(externalSightingsRoutes, boundedReadOptions);
   await app.register(predictRoutes, boundedReadOptions);

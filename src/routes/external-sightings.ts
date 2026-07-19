@@ -75,6 +75,7 @@ function externalWhere(read: ExternalRead): Prisma.ExternalSightingWhereInput {
   const base: Prisma.ExternalSightingWhereInput = {
     ...(read.source ? { source: read.source } : {}),
     observedAt: { gte: read.since },
+    publicFeedRemovedAt: null,
   };
   if (!read.cursor) return base;
   const observedAt = new Date(read.cursor.observedAt);

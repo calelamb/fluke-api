@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../db.js', () => ({
-  prisma: {
+vi.mock('../db.js', () => {
+  const transaction = {
     user: { findUnique: vi.fn() },
     whale: { findMany: vi.fn(), findUnique: vi.fn() },
     sighting: {
@@ -11,10 +11,18 @@ vi.mock('../db.js', () => ({
       findUnique: vi.fn(),
       update: vi.fn(),
     },
-    sightingWhale: { upsert: vi.fn() },
+    sightingWhale: { findUnique: vi.fn(), upsert: vi.fn() },
     auditLog: { create: vi.fn() },
-  },
-}));
+  };
+  return {
+    prisma: {
+      ...transaction,
+      $transaction: vi.fn(async (callback: (client: typeof transaction) => unknown) => (
+        callback(transaction)
+      )),
+    },
+  };
+});
 
 const { prisma } = await import('../db.js');
 const { buildApp } = await import('../app.js');

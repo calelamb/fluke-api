@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { vi } from 'vitest';
 import {
   fetchAcartiaCurrent,
+  fetchAcartiaSnapshot,
   normalizeAcartiaSighting,
   type AcartiaSighting,
 } from '../lib/acartia.js';
@@ -136,5 +137,16 @@ describe('fetchAcartiaCurrent', () => {
 
     expect(result).toHaveLength(1);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps valid raw IDs in reconciliation even when a row cannot be normalized', async () => {
+    const ambiguous = { ...baseRaw, latitude: undefined, ssemmi_id: 'ambiguous-id' };
+    const snapshot = await fetchAcartiaSnapshot({
+      fetchImpl: async () => new Response(JSON.stringify([ambiguous]), { status: 200 }),
+      url: 'https://provider.example/current',
+    });
+
+    expect(snapshot.sightings).toEqual([]);
+    expect(snapshot.reconciliation.seenExternalIds).toEqual(['ambiguous-id']);
   });
 });

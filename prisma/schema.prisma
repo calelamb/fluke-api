@@ -138,9 +138,11 @@ model Sighting {
   idempotencies   SubmissionIdempotency[]
   identificationSuggestion SightingIdentificationSuggestion?
   moderatedAt     DateTime?               @map("moderated_at")
+  publicFeedRevision BigInt?               @map("public_feed_revision")
   createdAt       DateTime                @default(now()) @map("created_at")
 
   @@index([status, observedAt(sort: Desc)])
+  @@index([publicFeedRevision])
   @@index([observerUserId, observedAt(sort: Desc), id(sort: Desc)])
   @@index([latitude, longitude])
   @@map("sightings")
@@ -335,9 +337,14 @@ model ExternalSighting {
   notes        String?
   trusted      Boolean  @default(false)
   fetchedAt    DateTime @default(now()) @map("fetched_at")
+  firstFetchedAt DateTime? @map("first_fetched_at")
+  updatedAt    DateTime @default(now()) @map("updated_at")
+  publicFeedRevision BigInt? @map("public_feed_revision")
+  publicFeedRemovedAt DateTime? @map("public_feed_removed_at")
 
   @@unique([source, externalId])
   @@index([observedAt(sort: Desc)])
+  @@index([publicFeedRevision])
   @@index([latitude, longitude])
   @@map("external_sightings")
 }

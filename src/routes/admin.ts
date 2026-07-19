@@ -160,80 +160,105 @@ export default async function adminRoutes(app: FastifyInstance) {
   });
 
   app.post<{ Params: { id: string } }>('/sightings/:id/approve', { preHandler: requireAdmin }, async (req, reply) => {
-    const sighting = await prisma.sighting.findUnique({ where: { id: req.params.id } });
-    if (!sighting) return reply.code(404).send({ error: 'Not found' });
-
-    await prisma.sighting.update({
-      where: { id: req.params.id },
-      data: {
-        status: 'APPROVED',
-        moderatedAt: new Date(),
-        moderatedById: req.admin!.userId,
-      },
+    const found = await prisma.$transaction(async (transaction) => {
+      const sighting = await transaction.sighting.findUnique({ where: { id: req.params.id } });
+      if (!sighting) return false;
+      await transaction.sighting.update({
+        where: { id: req.params.id },
+        data: {
+          status: 'APPROVED',
+          moderatedAt: new Date(),
+          moderatedById: req.admin!.userId,
+        },
+      });
+      await transaction.auditLog.create({
+        data: {
+          userId: req.admin!.userId,
+          action: 'APPROVE_SIGHTING',
+          entityType: 'sighting',
+          entityId: req.params.id,
+        },
+      });
+      return true;
     });
-
-    await prisma.auditLog.create({
-      data: {
-        userId: req.admin!.userId,
-        action: 'APPROVE_SIGHTING',
-        entityType: 'sighting',
-        entityId: req.params.id,
-      },
-    });
+    if (!found) return reply.code(404).send({ error: 'Not found' });
 
     return { ok: true };
   });
 
-  const RejectBody = z.object({ reason: z.string().min(1).max(500) });
+  const RejectBody = z.object({ reason: z.string().min(1).max(500) }).strict();
 
   app.post<{ Params: { id: string } }>('/sightings/:id/reject', { preHandler: requireAdmin }, async (req, reply) => {
     const parsed = RejectBody.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'reason required' });
 
-    const sighting = await prisma.sighting.findUnique({ where: { id: req.params.id } });
-    if (!sighting) return reply.code(404).send({ error: 'Not found' });
-
-    await prisma.sighting.update({
-      where: { id: req.params.id },
-      data: {
-        status: 'REJECTED',
-        rejectionReason: parsed.data.reason,
-        moderatedAt: new Date(),
-        moderatedById: req.admin!.userId,
-      },
+    const found = await prisma.$transaction(async (transaction) => {
+      const sighting = await transaction.sighting.findUnique({ where: { id: req.params.id } });
+      if (!sighting) return false;
+      await transaction.sighting.update({
+        where: { id: req.params.id },
+        data: {
+          status: 'REJECTED',
+          rejectionReason: parsed.data.reason,
+          moderatedAt: new Date(),
+          moderatedById: req.admin!.userId,
+        },
+      });
+      await transaction.auditLog.create({
+        data: {
+          userId: req.admin!.userId,
+          action: 'REJECT_SIGHTING',
+          entityType: 'sighting',
+          entityId: req.params.id,
+          metadata: { reason: parsed.data.reason },
+        },
+      });
+      return true;
     });
-
-    await prisma.auditLog.create({
-      data: {
-        userId: req.admin!.userId,
-        action: 'REJECT_SIGHTING',
-        entityType: 'sighting',
-        entityId: req.params.id,
-        metadata: { reason: parsed.data.reason },
-      },
-    });
+    if (!found) return reply.code(404).send({ error: 'Not found' });
 
     return { ok: true };
   });
 
   const LinkBody = z.object({
-    catalogId: z.string(),
+    catalogId: z.string().min(1).max(200),
     confidence: z.enum(['CONFIRMED', 'LIKELY', 'ML_SUGGESTED']),
-  });
+  }).strict();
 
   app.post<{ Params: { id: string } }>('/sightings/:id/link-whale', { preHandler: requireAdmin }, async (req, reply) => {
     const parsed = LinkBody.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'invalid body' });
 
-    const sighting = await prisma.sighting.findUnique({ where: { id: req.params.id } });
-    const whale = await prisma.whale.findUnique({ where: { catalogId: parsed.data.catalogId } });
-    if (!sighting || !whale) return reply.code(404).send({ error: 'Not found' });
-
-    await prisma.sightingWhale.upsert({
-      where: { sightingId_whaleId: { sightingId: req.params.id, whaleId: whale.id } },
-      create: { sightingId: req.params.id, whaleId: whale.id, confidence: parsed.data.confidence },
-      update: { confidence: parsed.data.confidence },
+    const found = await prisma.$transaction(async (transaction) => {
+      const [sighting, whale] = await Promise.all([
+        transaction.sighting.findUnique({ where: { id: req.params.id } }),
+        transaction.whale.findUnique({ where: { catalogId: parsed.data.catalogId } }),
+      ]);
+      if (!sighting || !whale) return false;
+      const existing = await transaction.sightingWhale.findUnique({
+        where: { sightingId_whaleId: { sightingId: req.params.id, whaleId: whale.id } },
+      });
+      if (existing?.confidence === parsed.data.confidence) return true;
+      await transaction.sightingWhale.upsert({
+        where: { sightingId_whaleId: { sightingId: req.params.id, whaleId: whale.id } },
+        create: { sightingId: req.params.id, whaleId: whale.id, confidence: parsed.data.confidence },
+        update: { confidence: parsed.data.confidence },
+      });
+      await transaction.auditLog.create({
+        data: {
+          action: 'LINK_SIGHTING_WHALE',
+          entityId: req.params.id,
+          entityType: 'sighting',
+          metadata: {
+            catalogId: parsed.data.catalogId,
+            confidence: parsed.data.confidence,
+          },
+          userId: req.admin!.userId,
+        },
+      });
+      return true;
     });
+    if (!found) return reply.code(404).send({ error: 'Not found' });
 
     return { ok: true };
   });

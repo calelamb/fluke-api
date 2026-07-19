@@ -79,6 +79,7 @@ describe('GET /api/v1/external-sightings', () => {
       orderBy: [{ observedAt: 'desc' }, { id: 'desc' }],
       take: 2,
       where: expect.objectContaining({
+        publicFeedRemovedAt: null,
         source: 'fixture',
         observedAt: { gte: expect.any(Date) },
       }),

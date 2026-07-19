@@ -110,24 +110,59 @@ function providerUrl(offset: number, years: number): string {
 export async function fetchGbifSightings(
   options: GbifFetchOptions,
 ): Promise<ExternalSightingInput[]> {
+  const snapshot = await fetchGbifSnapshot(options);
+  return [...snapshot.sightings];
+}
+
+export async function fetchGbifSnapshot(options: GbifFetchOptions) {
   if (!Number.isInteger(options.years) || options.years < 1 || options.years > 20) {
     throw new Error('years must be between 1 and 20');
   }
 
   const sightings = new Map<string, ExternalSightingInput>();
+  const seenExternalIds = new Set<string>();
+  let authoritative = false;
+  let expectedCount: number | null = null;
+  let offset = 0;
   for (let pageIndex = 0; pageIndex < MAX_PAGES; pageIndex += 1) {
-    const payload = await fetchJsonWithRetry(providerUrl(pageIndex * PAGE_SIZE, options.years), {
+    const payload = await fetchJsonWithRetry(providerUrl(offset, options.years), {
       attemptTimeoutMs: 15_000,
       fetchImpl: options.fetchImpl,
       signal: options.signal,
       sleep: options.sleep,
     });
     const page = GbifPageSchema.parse(payload);
+    if (expectedCount !== null && page.count !== expectedCount) break;
+    expectedCount ??= page.count;
+    const pageExternalIds = page.results.map((record) => String(record.key));
+    const pageHasDuplicates = new Set(pageExternalIds).size !== pageExternalIds.length
+      || pageExternalIds.some((externalId) => seenExternalIds.has(externalId));
+    if (pageHasDuplicates) break;
     for (const record of page.results) {
+      seenExternalIds.add(String(record.key));
       const normalized = normalizeRecord(record);
       if (normalized) sightings.set(normalized.externalId, normalized);
     }
-    if (page.endOfRecords || page.results.length === 0) break;
+    const nextOffset = offset + page.results.length;
+    if (page.endOfRecords) {
+      authoritative = nextOffset === expectedCount;
+      break;
+    }
+    if (page.results.length !== PAGE_SIZE || nextOffset >= expectedCount) break;
+    offset = nextOffset;
   }
-  return [...sightings.values()];
+  const observedTo = new Date();
+  const currentYear = observedTo.getUTCFullYear();
+  return Object.freeze({
+    reconciliation: authoritative
+      ? Object.freeze({
+          authoritative: true as const,
+          observedFrom: new Date(Date.UTC(currentYear - options.years, 0, 1)),
+          observedTo,
+          seenExternalIds: Object.freeze([...seenExternalIds]),
+          source: 'gbif' as const,
+        })
+      : null,
+    sightings: Object.freeze([...sightings.values()]),
+  });
 }
