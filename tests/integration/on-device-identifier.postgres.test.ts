@@ -13,7 +13,9 @@ const fixture = Object.freeze({
   activeManifestVersion: 'it-identifier-release-active',
   catalogId: 'IT-ON-DEVICE-IDENTIFIER',
   duplicateActiveManifestVersion: 'it-identifier-release-duplicate-active',
+  duplicateSequenceManifestVersion: 'it-identifier-release-duplicate-sequence',
   reviewerId: 'it-identifier-reviewer',
+  secondAcceptedManifestVersion: 'it-identifier-release-second-accepted',
   sightingId: 'it-identifier-sighting',
   whaleId: 'it-identifier-whale',
 });
@@ -74,7 +76,9 @@ async function cleanupFixture(prisma: PrismaClient): Promise<void> {
       WHERE "manifest_version" IN (
         ${fixture.acceptedManifestVersion},
         ${fixture.activeManifestVersion},
-        ${fixture.duplicateActiveManifestVersion}
+        ${fixture.duplicateActiveManifestVersion},
+        ${fixture.duplicateSequenceManifestVersion},
+        ${fixture.secondAcceptedManifestVersion}
       )
     `;
   }
@@ -100,6 +104,9 @@ describe('on-device identifier schema contract', () => {
     expect(migration).toContain('ON DELETE CASCADE ON UPDATE CASCADE');
     expect(migration).toContain('ON DELETE RESTRICT ON UPDATE CASCADE');
     expect(migration).toContain('ON DELETE SET NULL ON UPDATE CASCADE');
+    expect(migration).toContain('BEFORE UPDATE');
+    expect(migration).toContain('sighting_identification_suggestion_evidence_is_immutable');
+    expect(migration.match(/\bIS DISTINCT FROM\b/gu)).toHaveLength(8);
     expect(migration).not.toMatch(/^\s*(?:DELETE FROM|DROP TABLE|TRUNCATE)\b/mu);
     expect(migration).not.toContain('client_whale_name');
     expect(migration).not.toContain('embedding');
@@ -207,10 +214,112 @@ describe.runIf(postgresEnabled)('on-device identifier persistence against Postgr
     ).resolves.toBeNull();
   });
 
-  it('allows separately versioned non-active releases', async () => {
+  it('rejects Prisma changes to immutable suggestion evidence', async () => {
+    const active = await prisma.identifierRelease.create({
+      data: releaseFixture(fixture.activeManifestVersion, 'ACTIVE', 1n),
+    });
+    const suggestion = await prisma.sightingIdentificationSuggestion.create({
+      data: suggestionFixture(fixture.sightingId, active.manifestVersion),
+    });
+
+    await expect(
+      prisma.sightingIdentificationSuggestion.update({
+        data: { similarityScore: new Prisma.Decimal('0.9123456') },
+        where: { id: suggestion.id },
+      }),
+    ).rejects.toThrow('identifier suggestion evidence is immutable');
+
+    await expect(
+      prisma.sightingIdentificationSuggestion.findUniqueOrThrow({
+        where: { id: suggestion.id },
+      }),
+    ).resolves.toMatchObject({ similarityScore: new Prisma.Decimal('0.8123456') });
+  });
+
+  it('rejects raw SQL changes to immutable suggestion evidence', async () => {
+    const active = await prisma.identifierRelease.create({
+      data: releaseFixture(fixture.activeManifestVersion, 'ACTIVE', 1n),
+    });
+    const suggestion = await prisma.sightingIdentificationSuggestion.create({
+      data: suggestionFixture(fixture.sightingId, active.manifestVersion),
+    });
+
+    await expect(
+      prisma.$executeRaw`
+        UPDATE "sighting_identification_suggestions"
+        SET "matched_reference_photo_ids" = ${JSON.stringify(['changed-reference-photo-id'])}::jsonb
+        WHERE "id" = ${suggestion.id}
+      `,
+    ).rejects.toThrow('identifier suggestion evidence is immutable');
+
+    await expect(
+      prisma.sightingIdentificationSuggestion.findUniqueOrThrow({
+        where: { id: suggestion.id },
+      }),
+    ).resolves.toMatchObject({
+      matchedReferencePhotoIds: ['it-reference-photo-left'],
+    });
+  });
+
+  it('allows moderation updates without changing immutable evidence', async () => {
+    const active = await prisma.identifierRelease.create({
+      data: releaseFixture(fixture.activeManifestVersion, 'ACTIVE', 1n),
+    });
+    const suggestion = await prisma.sightingIdentificationSuggestion.create({
+      data: suggestionFixture(fixture.sightingId, active.manifestVersion),
+    });
+    const reviewedAt = new Date('2026-07-18T12:10:00.000Z');
+
+    await expect(
+      prisma.sightingIdentificationSuggestion.update({
+        data: {
+          reviewedAt,
+          reviewedById: fixture.reviewerId,
+          status: 'REJECTED',
+        },
+        where: { id: suggestion.id },
+      }),
+    ).resolves.toMatchObject({
+      createdAt: suggestion.createdAt,
+      id: suggestion.id,
+      matchedReferencePhotoIds: suggestion.matchedReferencePhotoIds,
+      releaseManifestVersion: suggestion.releaseManifestVersion,
+      reviewedAt,
+      reviewedById: fixture.reviewerId,
+      scoreSemantics: suggestion.scoreSemantics,
+      sightingId: suggestion.sightingId,
+      similarityScore: suggestion.similarityScore,
+      status: 'REJECTED',
+      whaleId: suggestion.whaleId,
+    });
+  });
+
+  it('allows multiple separately versioned non-active releases', async () => {
+    await prisma.identifierRelease.create({
+      data: releaseFixture(fixture.acceptedManifestVersion, 'ACCEPTED', 3n),
+    });
     await expect(
       prisma.identifierRelease.create({
-        data: releaseFixture(fixture.acceptedManifestVersion, 'ACCEPTED', 3n),
+        data: releaseFixture(fixture.secondAcceptedManifestVersion, 'ACCEPTED', 4n),
+      }),
+    ).resolves.toMatchObject({
+      manifestVersion: fixture.secondAcceptedManifestVersion,
+      status: 'ACCEPTED',
+    });
+  });
+
+  it('rejects duplicate release sequences across different manifests and statuses', async () => {
+    await prisma.identifierRelease.create({
+      data: releaseFixture(fixture.acceptedManifestVersion, 'ACCEPTED', 3n),
+    });
+    await expect(
+      prisma.identifierRelease.create({
+        data: releaseFixture(fixture.duplicateSequenceManifestVersion, 'REVOKED', 3n),
+      }),
+    ).rejects.toMatchObject({ code: 'P2002' });
+    await expect(
+      prisma.identifierRelease.findUniqueOrThrow({
+        where: { manifestVersion: fixture.acceptedManifestVersion },
       }),
     ).resolves.toMatchObject({
       manifestVersion: fixture.acceptedManifestVersion,

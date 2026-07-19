@@ -69,3 +69,28 @@ ALTER TABLE "sighting_identification_suggestions"
   ADD CONSTRAINT "sighting_identification_suggestions_reviewed_by_id_fkey"
   FOREIGN KEY ("reviewed_by_id") REFERENCES "users"("id")
   ON DELETE SET NULL ON UPDATE CASCADE;
+
+CREATE FUNCTION "sighting_identification_suggestion_evidence_is_immutable"()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF OLD."id" IS DISTINCT FROM NEW."id"
+    OR OLD."sighting_id" IS DISTINCT FROM NEW."sighting_id"
+    OR OLD."whale_id" IS DISTINCT FROM NEW."whale_id"
+    OR OLD."release_manifest_version" IS DISTINCT FROM NEW."release_manifest_version"
+    OR OLD."similarity_score" IS DISTINCT FROM NEW."similarity_score"
+    OR OLD."score_semantics" IS DISTINCT FROM NEW."score_semantics"
+    OR OLD."matched_reference_photo_ids" IS DISTINCT FROM NEW."matched_reference_photo_ids"
+    OR OLD."created_at" IS DISTINCT FROM NEW."created_at"
+  THEN
+    RAISE EXCEPTION 'identifier suggestion evidence is immutable';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER "sighting_identification_suggestion_evidence_is_immutable"
+BEFORE UPDATE ON "sighting_identification_suggestions"
+FOR EACH ROW EXECUTE FUNCTION "sighting_identification_suggestion_evidence_is_immutable"();
