@@ -2,6 +2,10 @@
 
 Fluke API is the standalone HTTP service for Fluke's public whale catalog, sightings, predictions, photo workflows, and administrative tools. It owns the runtime API contracts and PostgreSQL schema used by the web and iOS clients.
 
+It is one repository in the [Fluke](https://github.com/calelamb/fluke) project — a
+non-commercial, single-author field guide for the orcas of the Pacific Northwest.
+This service is the data spine the web and iOS clients read from.
+
 ## Architecture
 
 - [Fastify](https://fastify.dev/) serves versioned routes under `/api/v1`.
@@ -145,3 +149,15 @@ gitleaks git --log-opts=--all --redact --no-banner .
 git diff --check
 git fsck --full --strict
 ```
+
+## Contributions and use
+
+The source is public so people can see how the service is built — the fail-closed
+configuration, the contract-artifact discipline, the bounded read routes. That
+transparency is the point.
+
+**It is not open to outside contributions.** This is a single-author personal
+project; pull requests and feature issues aren't being accepted. Read it, learn
+from it — you're not expected or invited to contribute. No open-source license is
+attached, so all rights are reserved; the source is available to understand, not a
+grant of reuse.
