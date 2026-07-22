@@ -28,6 +28,7 @@ env:
   JWT_SECRET: ${{ secrets.SCHEDULED_JOB_JWT_SECRET }}
   WEB_ORIGIN: https://fluke-pnw.vercel.app
   API_PUBLIC_ORIGIN: https://fluke-api.onrender.com
+  PUBLIC_READ_ORIGIN: https://fluke-pnw.vercel.app
   IDENTIFIER_SERVICE_URL: https://identifier.fluke.invalid
   ENABLE_ACCOUNTS: "false"
   IDENTIFIER_MODE: "disabled"
@@ -63,6 +64,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:generate
       - run: pnpm jobs:acartia
+      - run: pnpm warm:public acartia
 
   gbif:
     if: >-
@@ -86,6 +88,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:generate
       - run: pnpm jobs:gbif
+      - run: pnpm warm:public gbif
 
   predictions:
     if: >-
@@ -109,3 +112,4 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:generate
       - run: pnpm jobs:predictions
+      - run: pnpm warm:public predictions

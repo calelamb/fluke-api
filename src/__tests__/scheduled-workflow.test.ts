@@ -14,6 +14,10 @@ describe('production scheduled-job workflow', () => {
     expect(workflow).toContain('pnpm jobs:acartia');
     expect(workflow).toContain('pnpm jobs:gbif');
     expect(workflow).toContain('pnpm jobs:predictions');
+    expect(workflow).toContain('pnpm warm:public acartia');
+    expect(workflow).toContain('pnpm warm:public gbif');
+    expect(workflow).toContain('pnpm warm:public predictions');
+    expect(workflow).toContain('PUBLIC_READ_ORIGIN: https://fluke-pnw.vercel.app');
     expect(workflow).toContain('timeout-minutes: 5');
     expect(workflow).toContain('timeout-minutes: 20');
     expect(workflow).toContain('timeout-minutes: 15');
@@ -31,5 +35,6 @@ describe('production scheduled-job workflow', () => {
     expect(workflow).not.toContain('ENABLE_IDENTIFY:');
     expect(workflow).toContain('ENABLE_SUBMISSIONS: "false"');
     expect(workflow).not.toContain('pull_request:');
+    expect(workflow.toLowerCase()).not.toMatch(/keepalive|keep-alive/);
   });
 });
