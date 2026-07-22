@@ -105,6 +105,31 @@ describe('admin routes', () => {
   });
 
   describe('POST /api/v1/admin/sightings/:id/approve', () => {
+    it('refuses to approve an explicit diagnostic record into the public feed', async () => {
+      vi.mocked(prisma.sighting.findUnique).mockResolvedValue({
+        behaviorNotes: null,
+        id: 'diagnostic-uuid',
+        locationName: 'Diagnostic test pin',
+        observerEmail: 'release-check@fluke.invalid',
+        status: 'PENDING',
+      } as never);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/sightings/diagnostic-uuid/approve',
+        cookies: { fluke_admin: adminToken },
+      });
+
+      expect(response.statusCode).toBe(422);
+      expect(response.json()).toEqual(expect.objectContaining({
+        code: 'VALIDATION_ERROR',
+        message: 'The request is invalid.',
+        retryable: false,
+      }));
+      expect(prisma.sighting.update).not.toHaveBeenCalled();
+      expect(prisma.auditLog.create).not.toHaveBeenCalled();
+    });
+
     it('flips status to APPROVED and writes an audit log entry', async () => {
       vi.mocked(prisma.sighting.findUnique).mockResolvedValue({
         id: 'sighting-1',

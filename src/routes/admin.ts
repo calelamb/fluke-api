@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { prisma } from '../db.js';
 import { env } from '../env.js';
 import { requireAdmin } from '../lib/auth.js';
+import { classifyPublicSighting } from '../lib/public-data-hygiene.js';
 import { buildPhotoFilename, getStorageBackend } from '../lib/storage.js';
 import { identifierReleaseAdminRoutes } from './identifier-releases.js';
 import identificationSuggestionRoutes from './identification-suggestions.js';
@@ -160,9 +161,10 @@ export default async function adminRoutes(app: FastifyInstance) {
   });
 
   app.post<{ Params: { id: string } }>('/sightings/:id/approve', { preHandler: requireAdmin }, async (req, reply) => {
-    const found = await prisma.$transaction(async (transaction) => {
+    const outcome = await prisma.$transaction(async (transaction) => {
       const sighting = await transaction.sighting.findUnique({ where: { id: req.params.id } });
-      if (!sighting) return false;
+      if (!sighting) return 'missing' as const;
+      if (classifyPublicSighting(sighting)) return 'synthetic' as const;
       await transaction.sighting.update({
         where: { id: req.params.id },
         data: {
@@ -179,9 +181,12 @@ export default async function adminRoutes(app: FastifyInstance) {
           entityId: req.params.id,
         },
       });
-      return true;
+      return 'approved' as const;
     });
-    if (!found) return reply.code(404).send({ error: 'Not found' });
+    if (outcome === 'missing') return reply.code(404).send({ error: 'Not found' });
+    if (outcome === 'synthetic') {
+      return reply.code(422).send({ error: 'Synthetic records cannot be approved' });
+    }
 
     return { ok: true };
   });

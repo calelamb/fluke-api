@@ -17,6 +17,7 @@ describe('production scheduled-job workflow', () => {
     expect(workflow).toContain('pnpm warm:public acartia');
     expect(workflow).toContain('pnpm warm:public gbif');
     expect(workflow).toContain('pnpm warm:public predictions');
+    expect(workflow.match(/pnpm verify:production-data/gu)).toHaveLength(3);
     expect(workflow).toContain('PUBLIC_READ_ORIGIN: https://fluke-pnw.vercel.app');
     expect(workflow).toContain('timeout-minutes: 5');
     expect(workflow).toContain('timeout-minutes: 20');

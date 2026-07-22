@@ -64,6 +64,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:generate
       - run: pnpm jobs:acartia
+      - run: pnpm verify:production-data
       - run: pnpm warm:public acartia
 
   gbif:
@@ -88,6 +89,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:generate
       - run: pnpm jobs:gbif
+      - run: pnpm verify:production-data
       - run: pnpm warm:public gbif
 
   predictions:
@@ -112,4 +114,5 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:generate
       - run: pnpm jobs:predictions
+      - run: pnpm verify:production-data
       - run: pnpm warm:public predictions
